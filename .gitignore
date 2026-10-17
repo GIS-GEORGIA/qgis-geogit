@@ -1,2 +1,5 @@
 __pycache__/
 *.pyc
+server/data/
+server/.env.local
+dist/
