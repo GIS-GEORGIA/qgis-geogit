@@ -13,6 +13,7 @@
 - **პროექტის შედარება:** ფენები, სტილები, ხელმოწერები, ფენების ხე, CRS, ბეჭდვის layout-ები
 - **შერწყმა:** ბრენჩების შერწყმა, კონფლიქტების ფანჯარა, GeoPackage-ის შერწყმა ობიექტებისა და ველების დონეზე
 - **დაბლოკვა:** Git LFS-ის დაბლოკვები, რომ ორმა ადამიანმა ერთი ფაილი ერთდროულად არ შეცვალოს
+- **ისტორიის ინსტრუმენტები:** ვერსიის მონიშვნა (tag), ცვლილებების ანგარიში (HTML), ფაილის აღდგენა ძველი ვერსიიდან, ვერსიის გაუქმება (revert), ძველი ვერსიის რუკაზე ჩამატება
 - ქართული და ინგლისური ინტერფეისი
 
 ## მოთხოვნები
@@ -38,6 +39,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/smoke_diff.py    # ვექტორი
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_raster.py  # რასტრის ცვლილებები და swipe
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_project.py # პროექტის ცვლილებები და დაბლოკვის ნიშნები
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_merge.py   # pull კონფლიქტით, შერწყმა და დასრულება
+QT_QPA_PLATFORM=offscreen python3 tests/smoke_tools.py   # tag, ანგარიში, აღდგენა, revert, ძველი ვერსია რუკაზე
 python3 tests/server_e2e.py                              # ორი მომხმარებელი ლოკალურ Forgejo-ზე
 ```
 
@@ -56,6 +58,7 @@ Puts a whole project folder (`.qgz`, vector and raster layers, styles, documents
 - **Project comparison:** layers, styles, labels, layer tree, CRS, print layouts
 - **Merge:** merge branches, conflict window, GeoPackages merged feature by feature and attribute by attribute
 - **Locks:** Git LFS file locks so two people do not edit one file at the same time
+- **History tools:** tag a version, HTML change report, restore a file from an old version, undo a version (revert), add an old version to the map
 - Georgian and English interface
 
 ## Requirements

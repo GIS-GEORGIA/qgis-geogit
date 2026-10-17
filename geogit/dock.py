@@ -5,10 +5,10 @@ import tempfile
 from datetime import datetime
 
 from qgis.core import (Qgis, QgsApplication, QgsCoordinateTransform, QgsCsException, QgsProject,
-                       QgsRectangle, QgsSettings, QgsTask)
+                       QgsRasterLayer, QgsRectangle, QgsSettings, QgsTask, QgsVectorLayer)
 from qgis.gui import QgsDockWidget
-from qgis.PyQt.QtCore import Qt, QTimer
-from qgis.PyQt.QtGui import QBrush, QColor, QIcon, QPalette
+from qgis.PyQt.QtCore import Qt, QTimer, QUrl
+from qgis.PyQt.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPalette
 from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                                  QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
                                  QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTabWidget,
@@ -285,6 +285,8 @@ class GeoGitDock(QgsDockWidget):
         self.history.setItemDelegateForColumn(0, GraphDelegate(self.history))
         self.history.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.history.currentItemChanged.connect(self._commit_selected)
+        self.history.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history.customContextMenuRequested.connect(self._history_menu)
         self.commit_files = QTreeWidget()
         self.commit_files.setRootIsDecorated(False)
         self.commit_files.setColumnCount(2)
@@ -473,7 +475,7 @@ class GeoGitDock(QgsDockWidget):
             key = c.email.lower() or c.author
             name, count = authors.get(key, (c.author, 0))
             authors[key] = (name, count + 1)
-            refs = [r.replace("HEAD -> ", "") for r in c.refs if r != "HEAD"]
+            refs = [r.replace("HEAD -> ", "").replace("tag: ", "🏷 ") for r in c.refs if r != "HEAD"]
             text = (f"[{', '.join(refs)}] " if refs else "") + c.subject
             when = datetime.fromtimestamp(c.time).strftime("%d.%m.%y %H:%M")
             color = graph.author_color(key)
@@ -545,6 +547,12 @@ class GeoGitDock(QgsDockWidget):
                            lambda: self.show_changes(path, sha))
         menu.addAction(_icon("/mActionHistory.svg"), t("show_file_history"),
                        lambda: self.show_file_history(path))
+        if tree is self.commit_files and self._selected_sha():
+            sha = self._selected_sha()
+            if gb.vector_main_file(path) or gb.raster_main_file(path):
+                menu.addAction(_icon("/mActionAddLayer.svg"), t("load_version"),
+                               lambda: self.load_version(path, sha))
+            menu.addAction(_icon("/mActionUndo.svg"), t("restore"), lambda: self.restore_version(path, sha))
         if self._locks_usable():
             menu.addSeparator()
             lk = self._locks.get(path)
@@ -631,6 +639,89 @@ class GeoGitDock(QgsDockWidget):
             path = item.data(0, PATH_ROLE)
             lk = self._locks.get(path)
             self.unlock_file(path, force=bool(lk and lk.ours is False))
+
+    # --- history tools -------------------------------------------------
+    def _history_menu(self, pos):
+        item = self.history.itemAt(pos)
+        if not item or not self.repo:
+            return
+        sha = item.data(1, PATH_ROLE)
+        subject = next((c.subject for c in self._commits if c.sha == sha), sha[:8])
+        menu = QMenu(self.history)
+        menu.addAction(_icon("/mActionLabeling.svg"), t("tag"), lambda: self.tag_version(sha))
+        menu.addAction(_icon("/mActionFileOpen.svg"), t("report"), lambda: self.report_version(sha))
+        menu.addSeparator()
+        menu.addAction(_icon("/mActionUndo.svg"), t("revert"), lambda: self.revert_version(sha, subject))
+        menu.exec(self.history.viewport().mapToGlobal(pos))
+
+    def tag_version(self, sha):
+        name, ok = QInputDialog.getText(self, t("tag"), t("tag_name"))
+        name = name.strip().replace(" ", "-")
+        if not ok or not name:
+            return
+        message, ok = QInputDialog.getText(self, t("tag"), t("tag_message"))
+        if not ok or not self._ensure_identity():
+            return
+        try:
+            self.repo.add_tag(name, sha, message.strip())
+        except gb.GitError as e:
+            self._show_error(e)
+            return
+        self.iface.messageBar().pushMessage("GeoGit", t("tagged", name), Qgis.MessageLevel.Success, 6)
+        self.refresh()
+
+    def revert_version(self, sha, subject):
+        if QMessageBox.question(self, "GeoGit", t("revert_q", subject)) != QMessageBox.StandardButton.Yes:
+            return
+        if not self._ensure_identity():
+            return
+        repo = self.repo
+        self._run(t("revert"), lambda: repo.revert(sha), lambda new: t("reverted", new[:8]))
+
+    def restore_version(self, path, sha):
+        if QMessageBox.question(self, "GeoGit", t("restore_q", path, sha[:8])) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.repo.restore_file(sha, path)
+        except gb.GitError as e:
+            self._show_error(e)
+            return
+        self.iface.messageBar().pushMessage("GeoGit", t("restored", path), Qgis.MessageLevel.Success, 8)
+        self.refresh()
+
+    def load_version(self, path, sha):
+        """Add the file as it was in sha to the map (from the version cache)."""
+        repo = self.repo
+        main = gb.vector_main_file(path) or gb.raster_main_file(path)
+
+        def after(local):
+            if not local:
+                self.iface.messageBar().pushMessage("GeoGit", t("raster_only_one", path),
+                                                    Qgis.MessageLevel.Warning, 6)
+                return
+            name = f"{os.path.basename(main)} · {sha[:8]}"
+            layer = (QgsRasterLayer(local, name) if gb.raster_main_file(main)
+                     else QgsVectorLayer(local, name, "ogr"))
+            if layer.isValid():
+                QgsProject.instance().addMapLayer(layer)
+
+        self._run(t("load_version"), lambda: repo.cached_version(sha, main), after=after)
+
+    def report_version(self, sha):
+        default = os.path.join(os.path.expanduser("~"), f"geogit-{os.path.basename(self.repo.path)}-{sha[:8]}.html")
+        path, _ = QFileDialog.getSaveFileName(self, t("report"), default, "HTML (*.html)")
+        if not path:
+            return
+        repo = self.repo
+
+        def work():
+            from .report import build_report
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(build_report(repo, sha))
+            return path
+
+        self._run(t("report"), work, lambda p: t("report_saved", p),
+                  after=lambda p: QDesktopServices.openUrl(QUrl.fromLocalFile(p)), refresh=False)
 
     def _selected_sha(self):
         item = self.history.currentItem()

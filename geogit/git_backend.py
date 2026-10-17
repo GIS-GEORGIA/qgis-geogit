@@ -513,13 +513,51 @@ class GitRepo:
         return self.git("rev-parse", "HEAD").strip()
 
     def push(self):
+        """Publish the current branch together with its annotated tags."""
         info = self.branch_info()
         if info.detached:
             raise GitError("not on a branch")
         if info.upstream:
-            self.git("push", timeout=3600)
+            self.git("push", "--follow-tags", timeout=3600)
         else:
-            self.git("push", "-u", "origin", info.name, timeout=3600)
+            self.git("push", "--follow-tags", "-u", "origin", info.name, timeout=3600)
+
+    # --- tags, restore, revert -----------------------------------------
+    def tags(self):
+        """{tag name: commit sha}."""
+        out = self.git("tag", "--list", "--format=%(refname:short)%09%(*objectname)%(objectname)", check=False)
+        tags = {}
+        for line in out.splitlines():
+            name, _, sha = line.partition("\t")
+            # annotated tags print the commit (dereferenced) first, then the tag object
+            tags[name] = sha[:40]
+        return tags
+
+    def add_tag(self, name, sha, message=""):
+        """Annotated tag, so it carries author and date and travels with push."""
+        try:
+            self.git("check-ref-format", f"refs/tags/{name}")
+        except GitError:
+            raise GitError(f"bad tag name: {name}") from None
+        self.git("tag", "-a", name, sha, "-m", message or name)
+
+    def restore_file(self, sha, path):
+        """Put path (and a shapefile's sidecars) back as it was in sha; shows up as a change."""
+        members = [m for m in dataset_members(path) if self.file_exists(sha, m)]
+        if not members:
+            raise GitError(f"{path} does not exist in {sha[:8]}")
+        self.git("restore", f"--source={sha}", "--worktree", "--", *members)
+
+    def revert(self, sha):
+        """New version that undoes sha. Gives up cleanly if it would conflict."""
+        if len(self.git("rev-list", "--parents", "-n", "1", sha).split()) > 2:
+            raise GitError("merge versions cannot be undone this way")
+        try:
+            self.git("revert", "--no-edit", sha)
+        except GitError:
+            self.git("revert", "--abort", check=False)
+            raise
+        return self.git("rev-parse", "HEAD").strip()
 
     # --- LFS file locks ------------------------------------------------
     @staticmethod

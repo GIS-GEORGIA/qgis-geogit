@@ -149,6 +149,53 @@ class RepoTest(unittest.TestCase):
         self.assertEqual(repo.branch_info().name, "main")
 
 
+class HistoryToolsTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.repo = new_repo(os.path.join(self.tmp.name, "p"))
+        for i in range(3):
+            write(os.path.join(self.repo.path, "data", "გზები.shp"), f"shp v{i}")
+            write(os.path.join(self.repo.path, "data", "გზები.dbf"), f"dbf v{i}")
+            write(os.path.join(self.repo.path, "notes.txt"), f"notes v{i}")
+            self.repo.commit(f"v{i}")
+        self.shas = [c.sha for c in reversed(self.repo.log())]
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def read(self, rel):
+        with open(os.path.join(self.repo.path, rel), encoding="utf-8") as f:
+            return f.read()
+
+    def test_tags_show_in_log(self):
+        self.repo.add_tag("ჩაბარება-2026", self.shas[1], "first delivery")
+        self.assertEqual(self.repo.tags(), {"ჩაბარება-2026": self.shas[1]})
+        refs = {c.sha: c.refs for c in self.repo.log()}
+        self.assertIn("tag: ჩაბარება-2026", refs[self.shas[1]])
+        with self.assertRaises(gb.GitError):
+            self.repo.add_tag("bad name..", self.shas[0])
+
+    def test_restore_shapefile(self):
+        self.repo.restore_file(self.shas[0], "data/გზები.shp")
+        self.assertEqual(self.read("data/გზები.shp"), "shp v0")
+        self.assertEqual(self.read("data/გზები.dbf"), "dbf v0")       # sidecar came along
+        self.assertEqual(self.read("notes.txt"), "notes v2")
+        self.assertEqual({c.path for c in self.repo.status()}, {"data/გზები.shp", "data/გზები.dbf"})
+        with self.assertRaises(gb.GitError):
+            self.repo.restore_file(self.shas[0], "missing.gpkg")
+
+    def test_revert(self):
+        self.repo.revert(self.shas[2])
+        self.assertEqual(self.read("notes.txt"), "notes v1")
+        self.assertTrue(self.repo.log()[0].subject.startswith("Revert"))
+
+    def test_revert_conflict_gives_up(self):
+        with self.assertRaises(gb.GitError):
+            self.repo.revert(self.shas[1])          # v2 changed the same lines again
+        self.assertEqual(self.repo.status(), [])
+        self.assertEqual(self.read("notes.txt"), "notes v2")
+
+
 class MergeTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
