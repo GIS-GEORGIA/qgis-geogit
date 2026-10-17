@@ -17,7 +17,7 @@
 3. ✅ ვექტორის diff რუკაზე: დამატებული, შეცვლილი (ძველი საზღვრით), წაშლილი
 4. ✅ რასტრის diff: სხვაობის რუკა, შეცვლილი უბნები, swipe-ით შედარება
 5. ✅ `.qgz`-ის diff (ფენები, სტილი, ხე, CRS, layout-ები), ფაილების დაბლოკვა (`git lfs lock`)
-6. merge და კონფლიქტების ფანჯარა
+6. ✅ merge და კონფლიქტების ფანჯარა: GeoPackage-ის შერწყმა ობიექტების და ველების დონეზე
 
 ## მოთხოვნები
 - QGIS 3.34+ (Qt5 ან Qt6)
@@ -32,6 +32,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/smoke_qgis.py    # პანელის
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_diff.py    # ვექტორის ცვლილებები რუკაზე
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_raster.py  # რასტრის ცვლილებები და swipe
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_project.py # პროექტის ცვლილებები და დაბლოკვის ნიშნები
+QT_QPA_PLATFORM=offscreen python3 tests/smoke_merge.py   # pull კონფლიქტით, შერწყმა და დასრულება
 ```
 
 ლიცენზია: GPL-3.0-or-later

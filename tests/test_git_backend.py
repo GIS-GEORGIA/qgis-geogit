@@ -149,6 +149,71 @@ class RepoTest(unittest.TestCase):
         self.assertEqual(repo.branch_info().name, "main")
 
 
+class MergeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        repo = new_repo(os.path.join(self.tmp.name, "p"))
+        write(os.path.join(repo.path, "გზები.gpkg"), "A\0base")
+        write(os.path.join(repo.path, "notes.txt"), "base\n")
+        write(os.path.join(repo.path, "only_main.txt"), "m\n")
+        repo.commit("base")
+        repo.create_branch("survey")
+        write(os.path.join(repo.path, "გზები.gpkg"), "A\0survey")
+        write(os.path.join(repo.path, "new_on_survey.txt"), "s\n")
+        repo.commit("survey work")
+        repo.switch("main")
+        write(os.path.join(repo.path, "გზები.gpkg"), "A\0main")
+        repo.commit("main work")
+        self.repo = repo
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def read(self, name):
+        with open(os.path.join(self.repo.path, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_conflict_stages_and_resolve(self):
+        conflicts = self.repo.merge("survey")
+        self.assertEqual(conflicts, ["გზები.gpkg"])
+        self.assertTrue(self.repo.in_merge())
+        self.assertEqual(self.repo.merge_head_name(), "survey")
+        self.assertEqual({c.path: c.code for c in self.repo.status()}["გზები.gpkg"], "U")
+        out = os.path.join(self.tmp.name, "stages")
+        for stage, text in ((1, "base"), (2, "main"), (3, "survey")):
+            with open(self.repo.export_stage(stage, "გზები.gpkg", os.path.join(out, str(stage))), "rb") as f:
+                self.assertEqual(f.read(), b"A\0" + text.encode())
+        with self.assertRaises(gb.GitError):
+            self.repo.finish_merge()
+        self.repo.resolve("გზები.gpkg", "theirs")
+        self.assertEqual(self.repo.conflicts(), [])
+        sha = self.repo.finish_merge()
+        self.assertFalse(self.repo.in_merge())
+        self.assertEqual(len(self.repo.log()[0].parents), 2)
+        self.assertEqual(self.read("გზები.gpkg"), "A\0survey")
+        self.assertEqual(self.read("new_on_survey.txt"), "s\n")
+        self.assertEqual(self.repo.log()[0].sha, sha)
+
+    def test_abort(self):
+        self.repo.merge("survey")
+        self.repo.abort_merge()
+        self.assertFalse(self.repo.in_merge())
+        self.assertEqual(self.read("გზები.gpkg"), "A\0main")
+
+    def test_clean_merge(self):
+        repo = self.repo
+        repo.git("reset", "-q", "--hard", "HEAD~1")    # main without its gpkg edit
+        self.assertEqual(repo.merge("survey"), [])
+        self.assertFalse(repo.in_merge())
+
+    def test_resolve_mark_manual(self):
+        self.repo.merge("survey")
+        write(os.path.join(self.repo.path, "გზები.gpkg"), "A\0merged by hand")
+        self.repo.mark_resolved("გზები.gpkg")
+        self.repo.finish_merge("Merge survey: roads merged by hand")
+        self.assertEqual(self.repo.log()[0].subject, "Merge survey: roads merged by hand")
+
+
 class FakeLfsRepo(gb.GitRepo):
     """Answers `git lfs ...` with canned JSON, as git-lfs 3.x prints it."""
 

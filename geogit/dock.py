@@ -8,8 +8,8 @@ from qgis.core import (Qgis, QgsApplication, QgsCoordinateTransform, QgsCsExcept
                        QgsRectangle, QgsSettings, QgsTask)
 from qgis.gui import QgsDockWidget
 from qgis.PyQt.QtCore import Qt, QTimer
-from qgis.PyQt.QtGui import QBrush, QColor, QIcon
-from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
+from qgis.PyQt.QtGui import QBrush, QColor, QIcon, QPalette
+from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                                  QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
                                  QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTabWidget,
                                  QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -33,6 +33,29 @@ def _icon(name):
 KIND_ICONS = {"vector": "/mIconVector.svg", "raster": "/mIconRaster.svg",
               "project": "/mIconQgsProjectFile.svg", "style": "/mIconPaintEffects.svg",
               "other": "/mIconFile.svg"}
+
+
+class WrapLabel(QLabel):
+    """Word-wrapped label that keeps the height its text needs.
+
+    Inside a QTabWidget Qt does not pass height-for-width down, so a plain
+    wrapped QLabel gets squeezed to one line and its text is cut.
+    """
+
+    def __init__(self, text=""):
+        super().__init__(text)
+        self.setWordWrap(True)
+
+    def _fit(self):
+        self.setMinimumHeight(self.heightForWidth(max(self.width(), 50)))
+
+    def setText(self, text):
+        super().setText(text)
+        self._fit()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._fit()
 
 
 class GeoGitDock(QgsDockWidget):
@@ -138,6 +161,9 @@ class GeoGitDock(QgsDockWidget):
         br.addWidget(self.branch_label)
         br.addWidget(self.branch_combo, 1)
         br.addWidget(self.btn_new_branch)
+        self.btn_merge = QPushButton(_icon("/mActionMergeFeatures.svg"), "")
+        self.btn_merge.clicked.connect(self._merge_branch)
+        br.addWidget(self.btn_merge)
         l1.addLayout(br)
 
         rm = QHBoxLayout()
@@ -168,6 +194,26 @@ class GeoGitDock(QgsDockWidget):
         # changes tab
         ch = QWidget()
         lc = QVBoxLayout(ch)
+        self.merge_bar = QFrame()
+        self.merge_bar.setFrameShape(QFrame.Shape.StyledPanel)
+        self.merge_bar.setAutoFillBackground(True)
+        pal = self.merge_bar.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor(230, 126, 0, 45))
+        self.merge_bar.setPalette(pal)
+        mb = QVBoxLayout(self.merge_bar)
+        self.merge_label = WrapLabel()
+        mb.addWidget(self.merge_label)
+        mbr = QHBoxLayout()
+        self.btn_resolve = QPushButton(_icon("/mActionMergeFeatures.svg"), "")
+        self.btn_resolve.clicked.connect(self.open_conflicts)
+        self.btn_abort = QPushButton(_icon("/mActionUndo.svg"), "")
+        self.btn_abort.clicked.connect(self._abort_merge)
+        mbr.addWidget(self.btn_resolve)
+        mbr.addStretch(1)
+        mbr.addWidget(self.btn_abort)
+        mb.addLayout(mbr)
+        self.merge_bar.hide()
+        lc.addWidget(self.merge_bar)
         hdr = QHBoxLayout()
         self.chk_all = QCheckBox()
         self.chk_all.setChecked(True)
@@ -256,8 +302,7 @@ class GeoGitDock(QgsDockWidget):
         # locks tab
         lw = QWidget()
         ll = QVBoxLayout(lw)
-        self.locks_status = QLabel()
-        self.locks_status.setWordWrap(True)
+        self.locks_status = WrapLabel()
         ll.addWidget(self.locks_status)
         self.locks_tree = QTreeWidget()
         self.locks_tree.setRootIsDecorated(False)
@@ -291,6 +336,9 @@ class GeoGitDock(QgsDockWidget):
         self.btn_init.setText(t("init"))
         self.branch_label.setText(t("branch") + ":")
         self.btn_new_branch.setToolTip(t("new_branch"))
+        self.btn_merge.setText(t("merge"))
+        self.btn_resolve.setText(t("resolve"))
+        self.btn_abort.setText(t("abort_merge"))
         self.btn_remote.setToolTip(t("set_remote"))
         self.btn_pull.setText(t("pull"))
         self.btn_push.setText(t("push"))
@@ -367,6 +415,7 @@ class GeoGitDock(QgsDockWidget):
         try:
             self._fill_changes(force=full)
             self._fill_branch()
+            self._fill_merge_state()
             if full:
                 self._fill_history()
         except gb.GitError as e:
@@ -822,7 +871,7 @@ class GeoGitDock(QgsDockWidget):
 
     def _set_busy(self, busy):
         for w in (self.btn_commit, self.btn_discard, self.btn_pull, self.btn_push, self.btn_refresh,
-                  self.btn_init, self.btn_clone, self.branch_combo, self.btn_new_branch):
+                  self.btn_init, self.btn_clone, self.branch_combo, self.btn_new_branch, self.btn_merge):
             w.setEnabled(not busy)
 
     def _show_error(self, exc):
@@ -899,6 +948,9 @@ class GeoGitDock(QgsDockWidget):
     def _commit(self):
         self._maybe_save_project()
         msg = self.message.toPlainText().strip()
+        if self.repo.in_merge():
+            self._finish_merge(msg)
+            return
         if not msg:
             QMessageBox.information(self, "GeoGit", t("need_message"))
             return
@@ -945,11 +997,12 @@ class GeoGitDock(QgsDockWidget):
                 if QMessageBox.question(self, "GeoGit", t("reload_project_q")) == QMessageBox.StandardButton.Yes:
                     QgsProject.instance().read(project)
 
-        def after_pull(result):
-            after(result)
+        def after_pull(conflicts):
+            after(conflicts)
             self.load_locks()
+            self._merge_result(conflicts, t("pulled"))
 
-        self._run(t("pull"), repo.pull, t("pulled"), after_pull)
+        self._run(t("pull"), repo.pull, None, after_pull)
 
     def _push(self):
         self._run(t("push"), self.repo.push, t("pushed"), after=lambda _: self.load_locks())
@@ -978,6 +1031,70 @@ class GeoGitDock(QgsDockWidget):
         except gb.GitError as e:
             self._show_error(e)
         self.refresh()
+
+    # --- merge -----------------------------------------------------------
+    def _fill_merge_state(self):
+        merging = self.repo.in_merge()
+        self.merge_bar.setVisible(merging)
+        self.btn_commit.setText(t("finish_merge") if merging else t("commit"))
+        self.btn_merge.setEnabled(not merging)
+        if merging:
+            self.btn_discard.setEnabled(False)   # would throw away resolved conflicts; abort instead
+        else:
+            return
+        head = self.repo.merge_head_name()
+        n = len(self.repo.conflicts())
+        self.merge_label.setText(t("merge_banner", head, n) if n else t("merge_banner_done", head))
+        self.btn_resolve.setVisible(bool(n))
+        self.btn_commit.setEnabled(not n)
+
+    def _merge_result(self, conflicts, ok_text):
+        bar = self.iface.messageBar()
+        if conflicts:
+            bar.pushMessage("GeoGit", t("merge_conflicts", len(conflicts)), Qgis.MessageLevel.Warning, 10)
+            self.refresh()
+            self.open_conflicts()
+        else:
+            bar.pushMessage("GeoGit", ok_text, Qgis.MessageLevel.Success, 5)
+
+    def _merge_branch(self):
+        current = self.repo.branch_info().name
+        others = [b for b in self.repo.branches() if b != current]
+        if not others:
+            return
+        name, ok = QInputDialog.getItem(self, t("merge"), t("merge_pick", current), others, 0, False)
+        if not ok or not self._ensure_identity():
+            return
+        repo = self.repo
+        self._run(t("merge"), lambda: repo.merge(name), after=lambda c: self._merge_result(c, t("merge_ok")))
+
+    def open_conflicts(self):
+        from .merge_dialog import ConflictDialog
+        dlg = ConflictDialog(self)
+        dlg.finished.connect(lambda _: self.refresh())
+        dlg.show()
+        self._dialogs = [d for d in getattr(self, "_dialogs", []) if d.isVisible()] + [dlg]
+        return dlg
+
+    def _abort_merge(self):
+        if QMessageBox.question(self, "GeoGit", t("abort_merge_q")) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.repo.abort_merge()
+        except gb.GitError as e:
+            self._show_error(e)
+        self.refresh()
+
+    def _finish_merge(self, msg):
+        if not self._ensure_identity():
+            return
+        repo = self.repo
+
+        def after(_):
+            self.message.clear()
+
+        self._run(t("finish_merge"), lambda: repo.finish_merge(msg or None),
+                  lambda sha: t("merged", sha[:8]), after)
 
     def _new_branch(self):
         name, ok = QInputDialog.getText(self, t("new_branch"), t("new_branch_name"))

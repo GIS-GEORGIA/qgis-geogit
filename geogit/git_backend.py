@@ -5,6 +5,7 @@ No QGIS imports here, so the module runs (and is tested) outside QGIS.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -419,11 +420,97 @@ class GitRepo:
         self.git("fetch", "--prune", timeout=3600)
 
     def pull(self):
+        """Get updates; returns the conflicted paths ([] when it merged cleanly)."""
         info = self.branch_info()
         args = ["pull", "--rebase=false", "--no-edit"]
         if not info.upstream and not info.detached:
             args += ["origin", info.name]
-        self.git(*args, timeout=3600)
+        return self._merging(args)
+
+    # --- merge and conflicts -------------------------------------------
+    def merge(self, branch):
+        """Merge branch into the current one; returns the conflicted paths."""
+        return self._merging(["merge", "--no-ff", "--no-edit", branch])
+
+    def _merging(self, args):
+        try:
+            self.git(*args, timeout=3600)
+            return []
+        except GitError:
+            conflicts = self.conflicts() if self.in_merge() else []
+            if not conflicts:
+                raise
+            return conflicts
+
+    def in_merge(self):
+        return self.git("rev-parse", "-q", "--verify", "MERGE_HEAD", check=False).strip() != ""
+
+    def merge_head_name(self):
+        """Short name of what is being merged in: "survey", or "main (server)" for a pull."""
+        path = os.path.join(self.git("rev-parse", "--absolute-git-dir").strip(), "MERGE_MSG")
+        try:
+            with open(path, encoding="utf-8") as f:
+                line = f.readline().strip()
+        except OSError:
+            return ""
+        m = re.match(r"Merge (?:remote-tracking )?branch '([^']+)'(?: of (.+?))?(?: into .*)?$", line)
+        if not m:
+            return line
+        name, source = m.group(1), m.group(2)
+        if source:
+            source = os.path.basename(source.rstrip("/"))
+            source = source[:-4] if source.endswith(".git") else source
+            return f"{name} ({source})"
+        return name
+
+    def conflicts(self):
+        out = self.git("-c", "core.quotepath=off", "diff", "--name-only", "-z", "--diff-filter=U")
+        return sorted({p for p in out.split("\0") if p})
+
+    def export_stage(self, stage, path, dest_dir):
+        """Write one side of a conflict: 1 = common base, 2 = mine (HEAD), 3 = theirs.
+
+        Returns the written path, or None when that side has no such file.
+        """
+        rev = f":{stage}"
+        if not self.file_exists(rev, path):
+            return None
+        for member in dataset_members(path):
+            if member != path and not self.file_exists(rev, member):
+                # an unconflicted sidecar sits at stage 0
+                if not self.file_exists(":0", member):
+                    continue
+                src = f":0:{member}"
+            else:
+                src = f"{rev}:{member}"
+            target = os.path.join(dest_dir, member)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            self.git("cat-file", "--filters", src, out_file=target, timeout=3600)
+        return os.path.join(dest_dir, path)
+
+    def resolve(self, path, side):
+        """Settle a conflicted file with one whole side: "ours" or "theirs"."""
+        if self.file_exists(":2" if side == "ours" else ":3", path):
+            self.git("checkout", f"--{side}", "--", path)
+            self.git("add", "--", path)
+        else:
+            self.git("rm", "-q", "--", path)
+
+    def mark_resolved(self, path):
+        """The file in the working folder is the agreed result."""
+        if os.path.exists(os.path.join(self.path, path)):
+            self.git("add", "--", path)
+        else:
+            self.git("rm", "-q", "--cached", "--", path)
+
+    def abort_merge(self):
+        self.git("merge", "--abort")
+
+    def finish_merge(self, message=None):
+        if self.conflicts():
+            raise GitError("unresolved conflicts")
+        self.git("commit", *(["-m", message] if message else ["--no-edit"]))
+        return self.git("rev-parse", "HEAD").strip()
 
     def push(self):
         info = self.branch_info()
