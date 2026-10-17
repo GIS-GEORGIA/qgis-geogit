@@ -3,6 +3,7 @@
 No QGIS imports here, so the module runs (and is tested) outside QGIS.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -66,6 +67,15 @@ class Commit:
     refs: list
     subject: str
     files: list = field(default_factory=list)
+
+
+@dataclass
+class Lock:
+    id: str
+    path: str
+    owner: str
+    locked_at: str
+    ours: bool = None    # None when the server could not tell
 
 
 @dataclass
@@ -423,6 +433,28 @@ class GitRepo:
             self.git("push", timeout=3600)
         else:
             self.git("push", "-u", "origin", info.name, timeout=3600)
+
+    # --- LFS file locks ------------------------------------------------
+    @staticmethod
+    def _lock(d, ours=None):
+        return Lock(str(d.get("id", "")), d.get("path", ""), (d.get("owner") or {}).get("name", ""),
+                    d.get("locked_at", ""), ours)
+
+    def locks(self):
+        """Locks on the server; ours/theirs is filled when the server can verify them."""
+        try:
+            data = json.loads(self.git("lfs", "locks", "--verify", "--json", timeout=120) or "{}")
+            return ([self._lock(d, True) for d in data.get("ours") or []]
+                    + [self._lock(d, False) for d in data.get("theirs") or []])
+        except (GitError, ValueError, AttributeError):
+            data = json.loads(self.git("lfs", "locks", "--json", timeout=120) or "[]")
+            return [self._lock(d) for d in data]
+
+    def lock(self, path):
+        return self._lock(json.loads(self.git("lfs", "lock", "--json", path, timeout=120)), True)
+
+    def unlock(self, path, force=False):
+        self.git("lfs", "unlock", *(["--force"] if force else []), path, timeout=120)
 
     def create_branch(self, name, checkout=True):
         self.git("switch", "-c", name) if checkout else self.git("branch", name)

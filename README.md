@@ -16,7 +16,7 @@
 2. ✅ ისტორიის ხე (გრაფი), ფერი ავტორის მიხედვით, ფილტრები, ფაილის ისტორია
 3. ✅ ვექტორის diff რუკაზე: დამატებული, შეცვლილი (ძველი საზღვრით), წაშლილი
 4. ✅ რასტრის diff: სხვაობის რუკა, შეცვლილი უბნები, swipe-ით შედარება
-5. `.qgz`-ის diff, ფაილების დაბლოკვა (`git lfs lock`)
+5. ✅ `.qgz`-ის diff (ფენები, სტილი, ხე, CRS, layout-ები), ფაილების დაბლოკვა (`git lfs lock`)
 6. merge და კონფლიქტების ფანჯარა
 
 ## მოთხოვნები
@@ -31,6 +31,7 @@ python3 -m unittest discover -s tests                    # ბექენდი
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_qgis.py    # პანელის ტესტი PyQGIS-ში
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_diff.py    # ვექტორის ცვლილებები რუკაზე
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_raster.py  # რასტრის ცვლილებები და swipe
+QT_QPA_PLATFORM=offscreen python3 tests/smoke_project.py # პროექტის ცვლილებები და დაბლოკვის ნიშნები
 ```
 
 ლიცენზია: GPL-3.0-or-later

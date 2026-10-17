@@ -149,5 +149,48 @@ class RepoTest(unittest.TestCase):
         self.assertEqual(repo.branch_info().name, "main")
 
 
+class FakeLfsRepo(gb.GitRepo):
+    """Answers `git lfs ...` with canned JSON, as git-lfs 3.x prints it."""
+
+    def __init__(self, verify_ok=True):
+        super().__init__(".")
+        self.verify_ok = verify_ok
+        self.calls = []
+
+    def git(self, *args, **kw):
+        self.calls.append(args)
+        if args[:2] == ("lfs", "locks") and "--verify" in args:
+            if not self.verify_ok:
+                raise gb.GitError("server does not support lock verification")
+            return ('{"ours":[{"id":"1","path":"dem.tif","owner":{"name":"nino"},"locked_at":"2026-10-17T10:00:00Z"}],'
+                    '"theirs":[{"id":"2","path":"ფენები/გზები.gpkg","owner":{"name":"giorgi"},'
+                    '"locked_at":"2026-10-16T09:00:00Z"}]}')
+        if args[:2] == ("lfs", "locks"):
+            return '[{"id":"2","path":"ფენები/გზები.gpkg","owner":{"name":"giorgi"},"locked_at":"x"}]'
+        if args[:2] == ("lfs", "lock"):
+            return '{"id":"3","path":"%s","owner":{"name":"nino"},"locked_at":"now"}' % args[-1]
+        if args[:2] == ("lfs", "unlock"):
+            return ""
+        raise AssertionError(args)
+
+
+class LockTest(unittest.TestCase):
+    def test_locks_verified(self):
+        locks = FakeLfsRepo().locks()
+        self.assertEqual([(lk.path, lk.owner, lk.ours) for lk in locks],
+                         [("dem.tif", "nino", True), ("ფენები/გზები.gpkg", "giorgi", False)])
+
+    def test_locks_without_verify(self):
+        [lk] = FakeLfsRepo(verify_ok=False).locks()
+        self.assertEqual((lk.path, lk.owner, lk.ours), ("ფენები/გზები.gpkg", "giorgi", None))
+
+    def test_lock_unlock(self):
+        repo = FakeLfsRepo()
+        lk = repo.lock("dem.tif")
+        self.assertEqual((lk.id, lk.path, lk.ours), ("3", "dem.tif", True))
+        repo.unlock("dem.tif", force=True)
+        self.assertEqual(repo.calls[-1], ("lfs", "unlock", "--force", "dem.tif"))
+
+
 if __name__ == "__main__":
     unittest.main()

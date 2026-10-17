@@ -8,14 +8,14 @@ from qgis.core import (Qgis, QgsApplication, QgsCoordinateTransform, QgsCsExcept
                        QgsRectangle, QgsSettings, QgsTask)
 from qgis.gui import QgsDockWidget
 from qgis.PyQt.QtCore import Qt, QTimer
-from qgis.PyQt.QtGui import QIcon
+from qgis.PyQt.QtGui import QBrush, QColor, QIcon
 from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QHBoxLayout,
                                  QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
                                  QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTabWidget,
                                  QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from . import git_backend as gb
-from . import graph, i18n, raster_diff, vector_diff
+from . import graph, i18n, project_diff, raster_diff, vector_diff
 from .history_view import GRAPH_ROLE, GraphDelegate, author_icon, graph_width
 from .i18n import t
 
@@ -47,6 +47,8 @@ class GeoGitDock(QgsDockWidget):
         self._commits = []
         self._path_filter = None
         self._swipe = None
+        self._locks = {}
+        self._lfs = False
         self.setObjectName("GeoGitDock")
         lang = QgsSettings().value(SETTINGS_LANG, "")
         if lang:
@@ -251,6 +253,31 @@ class GeoGitDock(QgsDockWidget):
         lh.addWidget(hi, 1)
         self.tabs.addTab(hw, "")
 
+        # locks tab
+        lw = QWidget()
+        ll = QVBoxLayout(lw)
+        self.locks_status = QLabel()
+        self.locks_status.setWordWrap(True)
+        ll.addWidget(self.locks_status)
+        self.locks_tree = QTreeWidget()
+        self.locks_tree.setRootIsDecorated(False)
+        self.locks_tree.setColumnCount(3)
+        self.locks_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.locks_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.locks_tree.customContextMenuRequested.connect(
+            lambda pos: self._file_menu(self.locks_tree, pos))
+        ll.addWidget(self.locks_tree, 1)
+        lb = QHBoxLayout()
+        self.btn_unlock = QPushButton(_icon("/unlocked.svg"), "")
+        self.btn_unlock.clicked.connect(self._unlock_selected)
+        self.btn_locks_refresh = QPushButton(_icon("/mActionRefresh.svg"), "")
+        self.btn_locks_refresh.clicked.connect(self.load_locks)
+        lb.addWidget(self.btn_unlock)
+        lb.addStretch(1)
+        lb.addWidget(self.btn_locks_refresh)
+        ll.addLayout(lb)
+        self.tabs.addTab(lw, "")
+
         self.stack.addWidget(p1)
         self.setWidget(root)
 
@@ -275,6 +302,10 @@ class GeoGitDock(QgsDockWidget):
         self.btn_discard.setText(t("discard"))
         self.tabs.setTabText(0, t("changes"))
         self.tabs.setTabText(1, t("history"))
+        self.tabs.setTabText(2, t("locks"))
+        self.locks_tree.setHeaderLabels([t("col_path"), t("col_owner"), t("col_since")])
+        self.btn_unlock.setText(t("unlock"))
+        self.btn_locks_refresh.setText(t("refresh"))
         self.changes.setToolTip(t("dblclick_hint"))
         self.commit_files.setToolTip(t("dblclick_hint"))
         self.history.setHeaderLabels(["", t("col_message"), t("col_author"), t("col_date"), t("col_id")])
@@ -301,7 +332,10 @@ class GeoGitDock(QgsDockWidget):
         if self.folder:
             QgsSettings().setValue(SETTINGS_FOLDER, self.folder)
         self._unchecked.clear()
+        self._locks = {}
+        self._lfs = bool(self.repo) and self.repo.lfs_available()
         self.refresh(full=True)
+        self.load_locks()
 
     def _project_changed(self):
         path = QgsProject.instance().absolutePath()
@@ -369,6 +403,7 @@ class GeoGitDock(QgsDockWidget):
             it.setData(0, PATH_ROLE, ch.path)
             if ch.orig_path:
                 it.setToolTip(2, f"{ch.orig_path} → {ch.path}")
+            self._mark_lock(it, 2, ch.path)
             self.changes.addTopLevelItem(it)
         self.changes.blockSignals(False)
         for col in (0, 1):
@@ -455,13 +490,98 @@ class GeoGitDock(QgsDockWidget):
             return
         path = item.data(0, PATH_ROLE)
         menu = QMenu(tree)
-        if gb.vector_main_file(path) or gb.raster_main_file(path):
+        if gb.vector_main_file(path) or gb.raster_main_file(path) or gb.file_kind(path) == "project":
             sha = self._selected_sha() if tree is self.commit_files else None
             menu.addAction(_icon("/mActionShowAllLayers.svg"), t("show_on_map"),
                            lambda: self.show_changes(path, sha))
         menu.addAction(_icon("/mActionHistory.svg"), t("show_file_history"),
                        lambda: self.show_file_history(path))
+        if self._locks_usable():
+            menu.addSeparator()
+            lk = self._locks.get(path)
+            if lk is None:
+                menu.addAction(_icon("/locked.svg"), t("lock"), lambda: self.lock_file(path))
+            elif lk.ours is False:
+                menu.addAction(_icon("/unlocked.svg"), t("unlock_force", lk.owner),
+                               lambda: self.unlock_file(path, force=True))
+            else:
+                menu.addAction(_icon("/unlocked.svg"), t("unlock"), lambda: self.unlock_file(path))
         menu.exec(tree.viewport().mapToGlobal(pos))
+
+    # --- LFS locks -----------------------------------------------------
+    def _locks_usable(self):
+        return bool(self.repo and self._lfs and self.repo.remote_url())
+
+    def _mark_lock(self, item, col, path):
+        lk = self._locks.get(path)
+        if lk is None:
+            return
+        when = lk.locked_at[:16].replace("T", " ")
+        if lk.ours is False:
+            item.setIcon(col, _icon("/locked.svg"))
+            item.setForeground(col, QBrush(QColor("#d62728")))
+            item.setToolTip(col, t("locked_by", lk.owner, when))
+        else:
+            item.setIcon(col, _icon("/lockedGray.svg"))
+            item.setToolTip(col, t("locked_mine", when) if lk.ours else t("locked_by", lk.owner, when))
+
+    def load_locks(self):
+        if not self.repo:
+            return
+        if not self._lfs:
+            self._show_locks([], t("locks_need_lfs"))
+            return
+        if not self.repo.remote_url():
+            self._show_locks([], t("locks_need_remote"))
+            return
+        self._run(t("locks"), self.repo.locks, after=self._show_locks, quiet=True, refresh=False,
+                  on_error=lambda e: self._show_locks([], t("locks_failed", e)))
+
+    def _show_locks(self, locks, status=None):
+        self._locks = {lk.path: lk for lk in locks}
+        self.locks_tree.clear()
+        for lk in sorted(locks, key=lambda x: x.path.lower()):
+            who = lk.owner + (f" ({t('you')})" if lk.ours else "")
+            it = QTreeWidgetItem([lk.path, who, lk.locked_at[:16].replace("T", " ")])
+            it.setData(0, PATH_ROLE, lk.path)
+            self._mark_lock(it, 0, lk.path)
+            self.locks_tree.addTopLevelItem(it)
+        for col in (1, 2):
+            self.locks_tree.resizeColumnToContents(col)
+        self.locks_status.setText(status or (t("n_locks", len(locks)) if locks else t("locks_none")))
+        self.tabs.setTabText(2, t("locks") + (f" ({len(locks)})" if locks else ""))
+        self.btn_unlock.setEnabled(self._locks_usable() and bool(locks))
+        self.btn_locks_refresh.setEnabled(self._locks_usable())
+        if self.repo:
+            self._fill_changes(force=True)
+
+    def _dataset_paths(self, path):
+        """A shapefile is locked together with its sidecar files."""
+        return [m for m in gb.dataset_members(path) if m == path or os.path.exists(os.path.join(self.repo.path, m))]
+
+    def lock_file(self, path):
+        repo = self.repo
+        paths = self._dataset_paths(path)
+        self._run(t("lock"), lambda: [repo.lock(p) for p in paths], t("locked_ok", path),
+                  after=lambda _: self.load_locks())
+
+    def unlock_file(self, path, force=False):
+        if force:
+            lk = self._locks.get(path)
+            q = t("unlock_force_q", path, lk.owner if lk else "?")
+            if QMessageBox.question(self, "GeoGit", q) != QMessageBox.StandardButton.Yes:
+                return
+        repo = self.repo
+        paths = [p for p in self._dataset_paths(path) if p in self._locks] or [path]
+        self._run(t("unlock"), lambda: [repo.unlock(p, force) for p in paths], t("unlocked_ok", path),
+                  after=lambda _: self.load_locks())
+
+    def _unlock_selected(self):
+        item = self.locks_tree.currentItem()
+        if item:
+            path = item.data(0, PATH_ROLE)
+            lk = self._locks.get(path)
+            self.unlock_file(path, force=bool(lk and lk.ours is False))
 
     def _selected_sha(self):
         item = self.history.currentItem()
@@ -473,10 +593,37 @@ class GeoGitDock(QgsDockWidget):
             self.show_changes(path, self._selected_sha() if tree is self.commit_files else None)
 
     def show_changes(self, path, sha=None):
-        if gb.raster_main_file(path):
+        if gb.file_kind(path) == "project":
+            self.show_project_diff(path, sha)
+        elif gb.raster_main_file(path):
             self.show_raster_diff(path, sha)
         elif gb.vector_main_file(path):
             self.show_vector_diff(path, sha)
+
+    def show_project_diff(self, path, sha=None):
+        """What changed in a .qgz/.qgs: layers, layer tree, CRS, layouts."""
+        repo = self.repo
+        label = sha[:8] if sha else t("working_copy")
+
+        def work():
+            if sha:
+                old_rev, new = repo.first_parent(sha), repo.cached_version(sha, path)
+            else:
+                old_rev = "HEAD" if repo.has_commits() else None
+                new = os.path.join(repo.path, path)
+            old = repo.cached_version(old_rev, path) if old_rev else None
+            return project_diff.diff_files(old, new)
+
+        def after(changes):
+            if not changes:
+                self.iface.messageBar().pushMessage("GeoGit", t("pd_none", path), Qgis.MessageLevel.Info, 6)
+                return
+            from .project_dialog import ProjectDiffDialog
+            dlg = ProjectDiffDialog(t("pd_title", path, label), changes, self)
+            dlg.show()
+            self._dialogs = [d for d in getattr(self, "_dialogs", []) if d.isVisible()] + [dlg]
+
+        self._run(t("comparing") + f" {path}", work, after=after)
 
     def show_raster_diff(self, path, sha=None):
         """Compare a raster in commit sha with its parent (sha None: unsaved vs HEAD)."""
@@ -640,9 +787,11 @@ class GeoGitDock(QgsDockWidget):
         return checked, len(checked) == len(items)
 
     # --- background work -----------------------------------------------
-    def _run(self, label, func, done_text=None, after=None):
+    def _run(self, label, func, done_text=None, after=None, quiet=False, refresh=True, on_error=None):
+        """Run func in the background; quiet errors go to the message bar instead of a dialog."""
         self._set_busy(True)
-        self.iface.messageBar().pushMessage("GeoGit", t("working", label), Qgis.MessageLevel.Info, 3)
+        if not quiet:
+            self.iface.messageBar().pushMessage("GeoGit", t("working", label), Qgis.MessageLevel.Info, 3)
 
         def work(_task):
             return func()
@@ -651,14 +800,21 @@ class GeoGitDock(QgsDockWidget):
             self._tasks = [x for x in self._tasks if x is not task]
             self._set_busy(False)
             if exception is not None:
-                self._show_error(exception)
+                if on_error:
+                    on_error(exception)
+                if quiet:
+                    self.iface.messageBar().pushMessage("GeoGit", f"{label}: {exception}",
+                                                        Qgis.MessageLevel.Warning, 8)
+                else:
+                    self._show_error(exception)
             else:
                 if done_text:
                     msg = done_text(result) if callable(done_text) else done_text
                     self.iface.messageBar().pushMessage("GeoGit", msg, Qgis.MessageLevel.Success, 5)
                 if after:
                     after(result)
-            self.refresh()
+            if refresh:
+                self.refresh()
 
         task = QgsTask.fromFunction(f"GeoGit: {label}", work, on_finished=finished)
         self._tasks.append(task)
@@ -752,6 +908,11 @@ class GeoGitDock(QgsDockWidget):
             return
         if not self._ensure_identity():
             return
+        theirs = [f"{p} ({self._locks[p].owner})" for p in paths
+                  if p in self._locks and self._locks[p].ours is False]
+        if theirs and QMessageBox.question(self, "GeoGit", t("commit_locked_q", "\n".join(theirs))) \
+                != QMessageBox.StandardButton.Yes:
+            return
         repo = self.repo
 
         def after(_):
@@ -784,15 +945,19 @@ class GeoGitDock(QgsDockWidget):
                 if QMessageBox.question(self, "GeoGit", t("reload_project_q")) == QMessageBox.StandardButton.Yes:
                     QgsProject.instance().read(project)
 
-        self._run(t("pull"), repo.pull, t("pulled"), after)
+        def after_pull(result):
+            after(result)
+            self.load_locks()
+
+        self._run(t("pull"), repo.pull, t("pulled"), after_pull)
 
     def _push(self):
-        self._run(t("push"), self.repo.push, t("pushed"))
+        self._run(t("push"), self.repo.push, t("pushed"), after=lambda _: self.load_locks())
 
     def _refresh_and_fetch(self):
         self.refresh()
         if self.repo and self.repo.remote_url():
-            self._run(t("refresh"), self.repo.fetch)
+            self._run(t("refresh"), self.repo.fetch, after=lambda _: self.load_locks())
 
     def _set_remote(self):
         url, ok = QInputDialog.getText(self, t("set_remote"), t("remote_url"), QLineEdit.EchoMode.Normal,
