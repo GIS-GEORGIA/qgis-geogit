@@ -7,7 +7,7 @@ description=Version control for a whole QGIS project folder (git + Git LFS) with
 description[ka]=მთელი QGIS პროექტის საქაღალდის ვერსიონირება (git + Git LFS) ღილაკებით: ვერსიის შენახვა, სერვერზე გამოქვეყნება და იქიდან მოტანა, ვინ რა შეცვალა. ორენოვანია (KA/EN).
 about=Puts the project folder (project file, vector and raster layers, styles, documents) under git with Git LFS for large geodata, and drives it from a QGIS panel: changed files, versions, branches, publish/get updates against GitHub, Forgejo or any git server, and the history with authors. Map-level diffs of vector and raster layers come next. License: GPL-3.0-or-later.
 about[ka]=პროექტის საქაღალდეს (პროექტის ფაილი, ვექტორული და რასტრული ფენები, სტილები, დოკუმენტები) აყენებს git-ის კონტროლზე, დიდ გეო-მონაცემებს ინახავს Git LFS-ით და ყველაფერს მართავს QGIS-ის პანელიდან: შეცვლილი ფაილები, ვერსიები, ბრენჩები, GitHub-ზე, Forgejo-ზე ან ნებისმიერ git სერვერზე გამოქვეყნება და მოტანა, ისტორია ავტორებით. შემდეგ ეტაპზე: ვექტორული და რასტრული ცვლილებების ჩვენება რუკაზე.
-version=0.3.0
+version=0.4.0
 author=GIS GEORGIA | Giorgi Kapanadze
 email=aigroegsig@gmail.com
 tags=git,version control,versioning,history,collaboration,lfs,georgian
@@ -17,6 +17,7 @@ repository=https://github.com/GIS-GEORGIA/qgis-plugins-repo
 category=Plugins
 icon=icon.svg
 experimental=True
-changelog=0.3.0 - Vector changes on the map: double-click or right-click a vector file to see added, modified (with the old shape) and deleted features as a styled layer, for any saved version or for unsaved edits. Works with GeoPackage, shapefile, GeoJSON and other OGR formats.
+changelog=0.4.0 - Raster changes on the map: difference layer (blue lower, red higher; change size for imagery), outlines of changed areas, pixel statistics, metadata changes, swipe tool to slide between versions. Large rasters are compared block by block; other grids are warped onto the old one. Versions are cached inside .git.
+    0.3.0 - Vector changes on the map: double-click or right-click a vector file to see added, modified (with the old shape) and deleted features as a styled layer, for any saved version or for unsaved edits. Works with GeoPackage, shapefile, GeoJSON and other OGR formats.
     0.2.0 - History graph with branches and merges, colour per author, filters by author, file type and text, history of a single file (right-click a file).
     0.1.0 - First version: project-folder repository with Git LFS, changes list, save version, publish/get updates, branches, history list with authors.

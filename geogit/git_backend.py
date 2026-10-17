@@ -109,11 +109,23 @@ def vector_main_file(path):
     return path if ext in VECTOR_MAIN_EXT else None
 
 
+RASTER_MAIN_EXT = {".tif", ".tiff", ".img", ".jp2", ".j2k", ".ecw", ".asc", ".sid", ".dem",
+                   ".hgt", ".nc", ".bil", ".png", ".jpg", ".jpeg"}
+RASTER_SIDECARS = [".tfw", ".tifw", ".wld", ".jgw", ".pgw", ".prj", ".hdr"]
+
+
+def raster_main_file(path):
+    return path if os.path.splitext(path)[1].lower() in RASTER_MAIN_EXT else None
+
+
 def dataset_members(path):
     """All files that make up the dataset stored at path."""
     base, ext = os.path.splitext(path)
-    if ext.lower() == ".shp":
+    ext = ext.lower()
+    if ext == ".shp":
         return [path] + [base + e for e in SHP_SIDECARS]
+    if ext in RASTER_MAIN_EXT:
+        return [path, path + ".ovr"] + [base + e for e in RASTER_SIDECARS]
     return [path]
 
 
@@ -315,6 +327,28 @@ class GitRepo:
         return list(zip(parts[0::2], parts[1::2]))
 
     # --- file versions -------------------------------------------------
+    def cache_dir(self, *parts):
+        """Folder inside .git for exported versions and diff results (never committed)."""
+        git_dir = self.git("rev-parse", "--absolute-git-dir").strip()
+        path = os.path.join(git_dir, "geogit", *parts)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def cached_version(self, rev, path):
+        """export_version into the cache, reusing an earlier export of the same commit."""
+        sha = self.git("rev-parse", "--verify", "-q", f"{rev}^{{commit}}", check=False).strip()
+        if not sha:
+            return None
+        dest = self.cache_dir("versions", sha[:12])
+        target = os.path.join(dest, path)
+        done = target + ".geogit-ok"     # an interrupted export is never reused
+        if os.path.exists(target) and os.path.exists(done):
+            return target
+        out = self.export_version(sha, path, dest)
+        if out:
+            open(done, "w").close()
+        return out
+
     def first_parent(self, sha):
         return self.git("rev-parse", "--verify", "-q", f"{sha}^1", check=False).strip() or None
 

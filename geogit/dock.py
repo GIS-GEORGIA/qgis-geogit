@@ -15,7 +15,7 @@ from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileD
                                  QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from . import git_backend as gb
-from . import graph, i18n, vector_diff
+from . import graph, i18n, raster_diff, vector_diff
 from .history_view import GRAPH_ROLE, GraphDelegate, author_icon, graph_width
 from .i18n import t
 
@@ -46,6 +46,7 @@ class GeoGitDock(QgsDockWidget):
         self._last_status = None
         self._commits = []
         self._path_filter = None
+        self._swipe = None
         self.setObjectName("GeoGitDock")
         lang = QgsSettings().value(SETTINGS_LANG, "")
         if lang:
@@ -66,6 +67,9 @@ class GeoGitDock(QgsDockWidget):
 
     def cleanup(self):
         self.timer.stop()
+        if self._swipe is not None and self.iface.mapCanvas().mapTool() is self._swipe:
+            self.iface.mapCanvas().unsetMapTool(self._swipe)
+        self._swipe = None
         prj = QgsProject.instance()
         for sig, slot in ((prj.readProject, self._project_changed), (prj.projectSaved, self.refresh)):
             try:
@@ -451,10 +455,10 @@ class GeoGitDock(QgsDockWidget):
             return
         path = item.data(0, PATH_ROLE)
         menu = QMenu(tree)
-        if gb.vector_main_file(path):
+        if gb.vector_main_file(path) or gb.raster_main_file(path):
             sha = self._selected_sha() if tree is self.commit_files else None
             menu.addAction(_icon("/mActionShowAllLayers.svg"), t("show_on_map"),
-                           lambda: self.show_vector_diff(path, sha))
+                           lambda: self.show_changes(path, sha))
         menu.addAction(_icon("/mActionHistory.svg"), t("show_file_history"),
                        lambda: self.show_file_history(path))
         menu.exec(tree.viewport().mapToGlobal(pos))
@@ -465,8 +469,79 @@ class GeoGitDock(QgsDockWidget):
 
     def _file_double_clicked(self, tree, item):
         path = item.data(0, PATH_ROLE)
-        if self.repo and path and gb.vector_main_file(path):
-            self.show_vector_diff(path, self._selected_sha() if tree is self.commit_files else None)
+        if self.repo and path:
+            self.show_changes(path, self._selected_sha() if tree is self.commit_files else None)
+
+    def show_changes(self, path, sha=None):
+        if gb.raster_main_file(path):
+            self.show_raster_diff(path, sha)
+        elif gb.vector_main_file(path):
+            self.show_vector_diff(path, sha)
+
+    def show_raster_diff(self, path, sha=None):
+        """Compare a raster in commit sha with its parent (sha None: unsaved vs HEAD)."""
+        repo = self.repo
+        label = sha[:8] if sha else t("working_copy")
+
+        def work():
+            if sha:
+                old_rev, new = repo.first_parent(sha), repo.cached_version(sha, path)
+                new_key = sha[:12]
+            else:
+                old_rev = "HEAD" if repo.has_commits() else None
+                new = os.path.join(repo.path, path)
+                new = new if os.path.exists(new) else None
+                new_key = f"work-{int(os.path.getmtime(new)) if new else 0}"
+            old = repo.cached_version(old_rev, path) if old_rev else None
+            if not old or not new:
+                return old, new, None
+            old_key = repo.git("rev-parse", old_rev).strip()[:12]
+            out = repo.cache_dir("diffs", f"{old_key}_{new_key}", path.replace("/", "__"))
+            return old, new, raster_diff.compare(old, new, out)
+
+        self._run(t("comparing") + f" {path}", work,
+                  after=lambda res: self._show_raster(path, label, *res))
+
+    def _show_raster(self, path, label, old, new, diff):
+        from .diff_layer import add_to_project
+        from .raster_layer import build_layers
+        bar = self.iface.messageBar()
+        if diff is not None and not diff.changed:
+            bar.pushMessage("GeoGit", t("raster_same", path), Qgis.MessageLevel.Info, 6)
+            return
+        layers = build_layers(path, label, old, new, diff)
+        group = add_to_project([lyr for lyr, _ in layers], f"GeoGit: {path} · {label}")
+        for lyr, visible in layers:
+            node = group.findLayer(lyr.id())
+            if node:
+                node.setItemVisibilityChecked(visible)
+        if diff is None:
+            bar.pushMessage("GeoGit", t("raster_only_one", path), Qgis.MessageLevel.Info, 8)
+        else:
+            msg = t("raster_summary", path, f"{diff.changed_pixels:,}".replace(",", " "), diff.changed_percent)
+            if diff.compared and (diff.min_diff or diff.max_diff):
+                msg += t("raster_range", diff.min_diff, diff.max_diff)
+            if diff.gained_pixels or diff.lost_pixels:
+                msg += t("raster_gain_loss", diff.gained_pixels, diff.lost_pixels)
+            if diff.meta_changes:
+                msg += t("raster_meta", ", ".join(t("meta_" + k) for k in diff.meta_changes))
+            if not diff.compared:
+                msg += t("raster_not_compared")
+            widget = bar.createMessage("GeoGit", msg)
+            old_layer = next((lyr for lyr, vis in layers if lyr.source() == old), None)
+            if old_layer is not None and new:
+                btn = QPushButton(_icon("/mActionPan.svg"), t("swipe"))
+                btn.clicked.connect(lambda: self.start_swipe(old_layer))
+                widget.layout().addWidget(btn)
+            bar.pushWidget(widget, Qgis.MessageLevel.Success, 20)
+        self._zoom_to([layers[0][0]] if layers else [])
+
+    def start_swipe(self, old_layer):
+        from .raster_layer import SwipeMapTool
+        canvas = self.iface.mapCanvas()
+        self._swipe = SwipeMapTool(canvas, [old_layer])
+        canvas.setMapTool(self._swipe)
+        self.iface.messageBar().pushMessage("GeoGit", t("swipe_hint"), Qgis.MessageLevel.Info, 6)
 
     def show_vector_diff(self, path, sha=None):
         """Compare a vector file in commit sha with its parent (sha None: unsaved vs HEAD)."""

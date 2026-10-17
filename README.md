@@ -15,7 +15,7 @@
 1. ✅ საფუძველი: git/LFS, ცვლილებები, commit, push/pull
 2. ✅ ისტორიის ხე (გრაფი), ფერი ავტორის მიხედვით, ფილტრები, ფაილის ისტორია
 3. ✅ ვექტორის diff რუკაზე: დამატებული, შეცვლილი (ძველი საზღვრით), წაშლილი
-4. რასტრის diff და swipe-ით შედარება
+4. ✅ რასტრის diff: სხვაობის რუკა, შეცვლილი უბნები, swipe-ით შედარება
 5. `.qgz`-ის diff, ფაილების დაბლოკვა (`git lfs lock`)
 6. merge და კონფლიქტების ფანჯარა
 
@@ -30,6 +30,7 @@ scripts/dev_install.sh                                   # QGIS პროფი�
 python3 -m unittest discover -s tests                    # ბექენდის ტესტები
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_qgis.py    # პანელის ტესტი PyQGIS-ში
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_diff.py    # ვექტორის ცვლილებები რუკაზე
+QT_QPA_PLATFORM=offscreen python3 tests/smoke_raster.py  # რასტრის ცვლილებები და swipe
 ```
 
 ლიცენზია: GPL-3.0-or-later
