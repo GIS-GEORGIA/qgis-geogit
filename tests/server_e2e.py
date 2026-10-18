@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 
@@ -36,7 +37,7 @@ def env():
 ENV = env()
 
 
-def api(method, path, user, body=None, ok=(200, 201, 204)):
+def api(method, path, user, body=None, ok=(200, 201, 204), raw=False):
     req = urllib.request.Request(f"{URL}/api/v1{path}", method=method,
                                  data=json.dumps(body).encode() if body is not None else None)
     req.add_header("Authorization", f"token {ENV[user.upper() + '_TOKEN']}")
@@ -44,6 +45,8 @@ def api(method, path, user, body=None, ok=(200, 201, 204)):
     try:
         with urllib.request.urlopen(req) as r:
             data = r.read()
+            if raw:
+                return data
             return json.loads(data) if data else None
     except urllib.error.HTTPError as e:
         if e.code in ok:
@@ -58,9 +61,7 @@ def checkout(user, root):
     with open(cred, "w") as f:
         f.write(f"http://{user}:{ENV[user.upper() + '_TOKEN']}@localhost%3a3000\n")
     os.chmod(cred, 0o600)
-    gb.run_git(["-c", f"credential.helper=store --file={cred}", "clone", f"{URL}/nino/{REPO}.git", dest], root)
-    repo = gb.GitRepo(dest)
-    repo.git("config", "credential.helper", f"store --file={cred}")
+    repo = gb.clone(f"{URL}/nino/{REPO}.git", dest, {"credential.helper": f"store --file={cred}"})
     repo.set_identity(user.capitalize(), f"{user}@geogit.test")
     return repo
 
@@ -116,7 +117,16 @@ def main():
     if lfs:
         pointer = nino.git("cat-file", "-p", "HEAD:parcels.gpkg")
         assert pointer.startswith("version https://git-lfs"), pointer[:80]
-        api("GET", f"/repos/nino/{REPO}/media/parcels.gpkg", "nino", ok=(200,))
+        # the server marks a new repository non-empty a moment after the first push
+        for _ in range(30):
+            try:
+                content = api("GET", f"/repos/nino/{REPO}/media/parcels.gpkg", "nino", ok=(200,), raw=True)
+                break
+            except RuntimeError:
+                time.sleep(0.5)
+        else:
+            raise AssertionError("LFS content of parcels.gpkg not served")
+        assert content.startswith(b"SQLite format 3"), content[:40]
         step("parcels.gpkg is stored in LFS on the server")
 
     giorgi = checkout("giorgi", root)
@@ -167,6 +177,22 @@ def main():
         nino.unlock("parcels.gpkg")
         assert giorgi.locks() == []
         step("nino unlocked it")
+
+    if lfs:
+        # a copy cloned with plain git (no LFS set up) holds pointer files until GeoGit opens it
+        plain = os.path.join(root, "plain")
+        cred = os.path.join(root, ".cred-giorgi")
+        gb.run_git(["-c", f"credential.helper=store --file={cred}", "-c", "filter.lfs.smudge=", "-c",
+                    "filter.lfs.process=", "-c", "filter.lfs.required=false", "clone", f"{URL}/nino/{REPO}.git",
+                    plain], root)
+        repo = gb.GitRepo(plain)
+        repo.git("config", "credential.helper", f"store --file={cred}")
+        with open(os.path.join(plain, "parcels.gpkg"), "rb") as f:
+            assert f.read(40).startswith(b"version https://git-lfs"), "expected a pointer file"
+        assert repo.ensure_lfs() is True and repo.ensure_lfs() is False
+        repo.lfs_pull()
+        assert owners(os.path.join(plain, "parcels.gpkg")) == owners(gpkg)
+        step("a plain git clone got LFS switched on and its real GeoPackage fetched")
 
     print(f"E2E OK  (working copies in {root})")
 

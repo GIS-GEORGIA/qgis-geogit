@@ -181,12 +181,25 @@ def find_repo_root(path):
         return None
 
 
-def clone(url, dest):
+def clone(url, dest, config=None):
+    """Clone url into dest with real LFS content, not pointer files.
+
+    config: extra git settings (e.g. a credential helper) used for the clone
+    and kept in the new repository.
+    """
+    config = config or {}
     parent = os.path.dirname(os.path.abspath(dest)) or "."
-    run_git(["clone", url, dest], parent, timeout=3600)
+    opts = [x for k, v in config.items() for x in ("-c", f"{k}={v}")]
+    run_git([*opts, "clone", url, dest], parent, timeout=3600)
     repo = GitRepo(dest)
+    for k, v in config.items():
+        repo.git("config", k, v)
     if repo.lfs_available():
-        repo.git("lfs", "pull", check=False, timeout=3600)
+        # the LFS filters may only be set up per repository, so a fresh clone
+        # can hold pointer files: switch LFS on here and fetch the content
+        repo.enable_lfs()
+        if repo.has_commits():          # an empty repository has nothing to fetch
+            repo.git("lfs", "pull", timeout=3600)
     return repo
 
 
@@ -219,9 +232,40 @@ class GitRepo:
         return self
 
     def setup_lfs(self):
-        self.git("lfs", "install", "--local")
+        self.enable_lfs()
         self._append_lines(".gitattributes", [f"{p} filter=lfs diff=lfs merge=lfs -text"
                                               for p in LFS_PATTERNS])
+
+    def enable_lfs(self):
+        """LFS hooks and filters for this repository, with lock checks that really stop a push.
+
+        Without lfs.locksverify git-lfs only warns when you push a file that
+        someone else has locked.
+        """
+        self.git("lfs", "install", "--local")
+        self.git("config", "lfs.locksverify", "true")
+
+    def ensure_lfs(self):
+        """Switch LFS on for a repository that uses it but was cloned without it.
+
+        Returns True when it had to, so the caller can fetch the real content
+        (`lfs_pull`) in place of pointer files.
+        """
+        if not self.lfs_available():
+            return False
+        try:
+            with open(os.path.join(self.path, ".gitattributes"), encoding="utf-8") as f:
+                uses_lfs = "filter=lfs" in f.read()
+        except OSError:
+            return False
+        if not uses_lfs or self.git("config", "--get", "lfs.locksverify", check=False).strip() == "true":
+            return False
+        self.enable_lfs()
+        return True
+
+    def lfs_pull(self):
+        if self.has_commits():
+            self.git("lfs", "pull", timeout=3600)
 
     def _append_lines(self, name, lines):
         path = os.path.join(self.path, name)
@@ -576,7 +620,10 @@ class GitRepo:
             return [self._lock(d) for d in data]
 
     def lock(self, path):
-        return self._lock(json.loads(self.git("lfs", "lock", "--json", path, timeout=120)), True)
+        data = json.loads(self.git("lfs", "lock", "--json", path, timeout=120))
+        if isinstance(data, list):      # some git-lfs versions wrap the lock in a list
+            data = data[0] if data else {}
+        return self._lock(data, True)
 
     def unlock(self, path, force=False):
         self.git("lfs", "unlock", *(["--force"] if force else []), path, timeout=120)

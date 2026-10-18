@@ -385,7 +385,12 @@ class GeoGitDock(QgsDockWidget):
         self._locks = {}
         self._lfs = bool(self.repo) and self.repo.lfs_available()
         self.refresh(full=True)
-        self.load_locks()
+        if self._lfs and self.repo.ensure_lfs():
+            # cloned without LFS: large files may still be pointer files
+            repo = self.repo
+            self._run("Git LFS", repo.lfs_pull, after=lambda _: self.load_locks())
+        else:
+            self.load_locks()
 
     def _project_changed(self):
         path = QgsProject.instance().absolutePath()

@@ -264,9 +264,10 @@ class MergeTest(unittest.TestCase):
 class FakeLfsRepo(gb.GitRepo):
     """Answers `git lfs ...` with canned JSON, as git-lfs 3.x prints it."""
 
-    def __init__(self, verify_ok=True):
+    def __init__(self, verify_ok=True, list_lock=False):
         super().__init__(".")
         self.verify_ok = verify_ok
+        self.list_lock = list_lock
         self.calls = []
 
     def git(self, *args, **kw):
@@ -280,7 +281,8 @@ class FakeLfsRepo(gb.GitRepo):
         if args[:2] == ("lfs", "locks"):
             return '[{"id":"2","path":"ფენები/გზები.gpkg","owner":{"name":"giorgi"},"locked_at":"x"}]'
         if args[:2] == ("lfs", "lock"):
-            return '{"id":"3","path":"%s","owner":{"name":"nino"},"locked_at":"now"}' % args[-1]
+            one = '{"id":"3","path":"%s","owner":{"name":"nino"},"locked_at":"now"}' % args[-1]
+            return f"[{one}]" if self.list_lock else one
         if args[:2] == ("lfs", "unlock"):
             return ""
         raise AssertionError(args)
@@ -300,6 +302,7 @@ class LockTest(unittest.TestCase):
         repo = FakeLfsRepo()
         lk = repo.lock("dem.tif")
         self.assertEqual((lk.id, lk.path, lk.ours), ("3", "dem.tif", True))
+        self.assertEqual(FakeLfsRepo(list_lock=True).lock("a.tif").path, "a.tif")   # git-lfs 3.3 form
         repo.unlock("dem.tif", force=True)
         self.assertEqual(repo.calls[-1], ("lfs", "unlock", "--force", "dem.tif"))
 
