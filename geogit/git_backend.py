@@ -140,25 +140,79 @@ def dataset_members(path):
     return [path]
 
 
+GIT_ENV = {"LC_ALL": "C", "LANG": "C", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
+FLATPAK_PERMISSION_CMD = "flatpak override --user --talk-name=org.freedesktop.Flatpak {app}"
+
+
+def in_flatpak():
+    return os.path.exists("/.flatpak-info")
+
+
+def flatpak_app_id():
+    return os.environ.get("FLATPAK_ID", "org.qgis.qgis")
+
+
+_git_mode = None     # "local" | "host" | "flatpak-no-permission" | "missing"
+
+
+def git_mode():
+    """How git can be reached from this QGIS.
+
+    A Flatpak QGIS has no git inside its sandbox; it can run the computer's
+    git through `flatpak-spawn --host`, but only when the Flatpak is allowed
+    to talk to org.freedesktop.Flatpak.
+    """
+    global _git_mode
+    if _git_mode is None:
+        if shutil.which("git"):
+            _git_mode = "local"
+        elif in_flatpak() and shutil.which("flatpak-spawn"):
+            def host_ok(*argv):
+                try:
+                    return subprocess.run(["flatpak-spawn", "--host", *argv], capture_output=True,
+                                          timeout=20, stdin=subprocess.DEVNULL).returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    return False
+            if not host_ok("true"):
+                _git_mode = "flatpak-no-permission"
+            else:
+                _git_mode = "host" if host_ok("git", "--version") else "missing"
+        else:
+            _git_mode = "missing"
+    return _git_mode
+
+
 def git_available():
-    return shutil.which("git") is not None
+    return git_mode() in ("local", "host")
 
 
 def _env():
     env = dict(os.environ)
-    env.update(LC_ALL="C", LANG="C", GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0")
+    env.update(GIT_ENV)
     return env
+
+
+def _command(args, cwd):
+    """The argv to run git with args in cwd (through the host when inside a Flatpak)."""
+    if git_mode() == "host":
+        return ["flatpak-spawn", "--host", f"--directory={os.path.abspath(cwd)}",
+                *[f"--env={k}={v}" for k, v in GIT_ENV.items()], "git", *args]
+    return ["git", *args]
 
 
 def run_git(args, cwd, check=True, timeout=600, out_file=None):
     """Run git and return its output as text; with out_file, stream stdout there instead."""
+    if git_mode() == "flatpak-no-permission":
+        raise GitError("git is not reachable from this Flatpak QGIS; allow it with: "
+                       + FLATPAK_PERMISSION_CMD.format(app=flatpak_app_id()))
+    cmd = _command(args, cwd)
     try:
         if out_file:
             with open(out_file, "wb") as f:
-                proc = subprocess.run(["git", *args], cwd=cwd, env=_env(), stdout=f,
+                proc = subprocess.run(cmd, cwd=cwd, env=_env(), stdout=f,
                                       stderr=subprocess.PIPE, timeout=timeout, stdin=subprocess.DEVNULL)
         else:
-            proc = subprocess.run(["git", *args], cwd=cwd, env=_env(), capture_output=True,
+            proc = subprocess.run(cmd, cwd=cwd, env=_env(), capture_output=True,
                                   timeout=timeout, stdin=subprocess.DEVNULL)
     except FileNotFoundError as e:
         raise GitError("git is not installed") from e

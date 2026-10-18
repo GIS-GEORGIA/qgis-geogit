@@ -147,6 +147,7 @@ class GeoGitDock(QgsDockWidget):
         l0 = QVBoxLayout(p0)
         self.not_repo_label = QLabel()
         self.not_repo_label.setWordWrap(True)
+        self.not_repo_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.btn_init = QPushButton(_icon("/mActionAdd.svg"), "")
         self.btn_init.clicked.connect(self._init_repo)
         l0.addWidget(self.not_repo_label)
@@ -416,7 +417,14 @@ class GeoGitDock(QgsDockWidget):
         has_folder = bool(self.folder)
         self.btn_project_folder.setEnabled(bool(QgsProject.instance().absolutePath()))
         if not gb.git_available():
-            self.not_repo_label.setText(t("no_git"))
+            mode = gb.git_mode()
+            if mode == "flatpak-no-permission":
+                text = t("no_git_flatpak", gb.FLATPAK_PERMISSION_CMD.format(app=gb.flatpak_app_id()))
+            elif gb.in_flatpak():
+                text = t("no_git_host")
+            else:
+                text = t("no_git")
+            self.not_repo_label.setText(text)
             self.btn_init.setEnabled(False)
             self.stack.setCurrentIndex(0)
             return

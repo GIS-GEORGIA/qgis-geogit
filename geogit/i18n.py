@@ -60,6 +60,16 @@ STRINGS = {
     "identity_email": ("შენი ელფოსტა:", "Your e-mail:"),
     "no_git": ("git ვერ ვიპოვე. დააყენე git და გადატვირთე QGIS.",
                "git was not found. Install git and restart QGIS."),
+    "no_git_flatpak": ("ეს QGIS Flatpak-ით არის დაყენებული და კომპიუტერის git-ს ვერ ხედავს. ტერმინალში ერთხელ "
+                       "გაუშვი ეს ბრძანება და მერე QGIS გადატვირთე:\n\n{0}\n\nეს QGIS-ს კომპიუტერზე ბრძანებების "
+                       "გაშვების უფლებას აძლევს (ასე იძახებს git-ს).",
+                       "This QGIS is a Flatpak and cannot see the computer's git. Run this once in a terminal, then "
+                       "restart QGIS:\n\n{0}\n\nIt lets QGIS run commands on the computer (that is how it calls "
+                       "git)."),
+    "no_git_host": ("კომპიუტერზე git არ არის დაყენებული (მაგ. sudo apt install git git-lfs). დააყენე და QGIS "
+                    "გადატვირთე.",
+                    "git is not installed on the computer (e.g. sudo apt install git git-lfs). Install it and "
+                    "restart QGIS."),
     "no_lfs": ("git-lfs დაყენებული არ არის: დიდი რასტრები და GPKG ჩვეულებრივ git-ში შეინახება. "
                "ჯობს დააყენო git-lfs და თავიდან ჩართო.",
                "git-lfs is not installed: large rasters and GPKG will be stored in plain git. "

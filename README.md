@@ -20,6 +20,7 @@
 - QGIS 3.44 LTR (Qt5) ან QGIS 4.x (Qt6); გატესტილია 3.44, 4.0 და 4.2 ვერსიებზე
 - `git`; დიდი ფაილებისა და დაბლოკვისთვის `git-lfs` (`sudo apt install git-lfs`)
 - GitHub-ისთვის ერთხელ: `gh auth login && gh auth setup-git`
+- **Flatpak QGIS** (`org.qgis.qgis`): ყუთში git არ არის, ამიტომ პლაგინი კომპიუტერის git-ს `flatpak-spawn --host`-ით იძახებს. ამისთვის ერთხელ საჭიროა `flatpak override --user --talk-name=org.freedesktop.Flatpak org.qgis.qgis` და QGIS-ის გადატვირთვა (ეს QGIS-ს კომპიუტერზე ბრძანებების გაშვების უფლებას აძლევს). git და git-lfs კომპიუტერზე უნდა იყოს დაყენებული.
 
 ## საკუთარი სერვერი (Forgejo)
 `server/` საქაღალდეში არის Forgejo 15 (LTS) Git LFS-ით და დაბლოკვებით:
@@ -42,6 +43,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/smoke_merge.py   # pull კონფლ�
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_tools.py   # tag, ანგარიში, აღდგენა, revert, ძველი ვერსია რუკაზე
 python3 tests/server_e2e.py                              # ორი მომხმარებელი ლოკალურ Forgejo-ზე
 scripts/test_in_docker.sh 3.44 4.0 4.2                   # ყველა ტესტი QGIS-ის ოფიციალურ docker image-ებში
+scripts/test_in_flatpak.sh                               # ყველა ტესტი Flatpak QGIS-ში (git კომპიუტერიდან)
 ```
 
 ---
@@ -63,7 +65,7 @@ Puts a whole project folder (`.qgz`, vector and raster layers, styles, documents
 - Georgian and English interface
 
 ## Requirements
-QGIS 3.44 LTR (Qt5) or QGIS 4.x (Qt6), tested on 3.44, 4.0 and 4.2; `git`, and `git-lfs` for large files and locks.
+QGIS 3.44 LTR (Qt5) or QGIS 4.x (Qt6), tested on 3.44, 4.0 and 4.2; `git`, and `git-lfs` for large files and locks. For the **Flatpak** QGIS run `flatpak override --user --talk-name=org.freedesktop.Flatpak org.qgis.qgis` once and restart QGIS: the plugin then runs the computer's git through `flatpak-spawn --host`.
 
 ## Own server
 `server/` holds a Forgejo 15 (LTS) setup with Git LFS and locks: `docker compose up -d`, then `./setup_users.sh`.
