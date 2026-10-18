@@ -3,7 +3,7 @@
 from qgis.core import (Qgis, QgsCategorizedSymbolRenderer, QgsCoordinateReferenceSystem, QgsFeature,
                        QgsField, QgsFields, QgsGeometry, QgsMemoryProviderUtils, QgsProject,
                        QgsRendererCategory, QgsSymbol, QgsWkbTypes)
-from qgis.PyQt.QtCore import QMetaType, Qt, QVariant
+from qgis.PyQt.QtCore import QMetaType, Qt
 from qgis.PyQt.QtGui import QColor
 
 from .i18n import t
@@ -58,9 +58,7 @@ def _wkb_type(geoms):
 
 
 def _string_field(name):
-    if Qgis.versionInt() >= 33800:
-        return QgsField(name, QMetaType.Type.QString)
-    return QgsField(name, QVariant.String)
+    return QgsField(name, QMetaType.Type.QString)      # QGIS 3.38+ (minimum here is 3.44)
 
 
 def build_layer(diff, title):
