@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 VECTOR_EXT = {".gpkg", ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".geojson", ".json",
@@ -198,6 +199,66 @@ def _command(args, cwd):
         return ["flatpak-spawn", "--host", f"--directory={os.path.abspath(cwd)}",
                 *[f"--env={k}={v}" for k, v in GIT_ENV.items()], "git", *args]
     return ["git", *args]
+
+
+def run_host(argv, timeout=60):
+    """Run a command on the computer (outside the Flatpak sandbox when QGIS is a Flatpak).
+
+    Returns (exit code, stdout, stderr); exit code 127 when it cannot be started.
+    """
+    if in_flatpak() and git_mode() != "local":
+        if git_mode() == "flatpak-no-permission":
+            return 127, "", "no permission to run commands outside the Flatpak"
+        argv = ["flatpak-spawn", "--host", *argv]
+    try:
+        proc = subprocess.run(argv, capture_output=True, timeout=timeout, stdin=subprocess.DEVNULL)
+    except FileNotFoundError:
+        return 127, "", f"{argv[0]}: not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", "timed out"
+    return (proc.returncode, proc.stdout.decode("utf-8", "replace"),
+            proc.stderr.decode("utf-8", "replace"))
+
+
+# package manager -> (command that installs git-lfs as root, what to show the user)
+_LFS_PACKAGES = [
+    ("apt-get", ["apt-get", "install", "-y", "git-lfs"], "sudo apt install git-lfs"),
+    ("dnf", ["dnf", "install", "-y", "git-lfs"], "sudo dnf install git-lfs"),
+    ("pacman", ["pacman", "-S", "--noconfirm", "git-lfs"], "sudo pacman -S git-lfs"),
+    ("zypper", ["zypper", "--non-interactive", "install", "git-lfs"], "sudo zypper install git-lfs"),
+]
+
+
+def lfs_install_plan():
+    """How git-lfs can be installed on this computer.
+
+    {"command": text to show/copy, "argv": what to run or None when it cannot be
+    done from QGIS, "needs_password": bool}.
+    """
+    if sys.platform == "win32":
+        return {"command": "winget install GitHub.GitLFS", "argv": None, "needs_password": False}
+    if sys.platform == "darwin":
+        ok = run_host(["sh", "-c", "command -v brew"])[0] == 0
+        return {"command": "brew install git-lfs", "argv": ["brew", "install", "git-lfs"] if ok else None,
+                "needs_password": False}
+    found = run_host(["sh", "-c", "for c in apt-get dnf pacman zypper pkexec; do command -v $c >/dev/null && echo $c; done"])
+    have = set(found[1].split()) if found[0] == 0 else set()
+    for tool, argv, shown in _LFS_PACKAGES:
+        if tool in have:
+            # pkexec asks for the password in the system's own dialog; QGIS never sees it
+            return {"command": shown, "argv": ["pkexec", *argv] if "pkexec" in have else None,
+                    "needs_password": True}
+    return {"command": "https://git-lfs.com", "argv": None, "needs_password": False}
+
+
+def install_lfs(plan):
+    """Run the plan's install command (raises GitError with its output when it fails)."""
+    code, out, err = run_host(plan["argv"], timeout=900)
+    if code != 0:
+        if code in (126, 127) and plan["argv"][0] == "pkexec":
+            raise GitError("cancelled or not authorised")
+        raise GitError((err or out).strip()[-800:] or f"exit code {code}")
+    return out
 
 
 def run_git(args, cwd, check=True, timeout=600, out_file=None):

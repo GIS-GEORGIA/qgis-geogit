@@ -1,6 +1,7 @@
 import glob
 import os
 import shutil
+import time
 import tempfile
 from datetime import datetime
 
@@ -21,6 +22,7 @@ from .i18n import t
 
 SETTINGS_FOLDER = "geogit/last_folder"
 SETTINGS_LANG = "geogit/lang"
+SETTINGS_FLATPAK_COPIED = "geogit/flatpak_command_copied"   # time the permission command was copied
 PATH_ROLE = Qt.ItemDataRole.UserRole
 AUTH_WORDS = ("authentication", "could not read username", "terminal prompts disabled",
               "permission denied", "403", "401")
@@ -28,6 +30,22 @@ AUTH_WORDS = ("authentication", "could not read username", "terminal prompts dis
 
 def _icon(name):
     return QgsApplication.getThemeIcon(name)
+
+
+def _process_start():
+    """When this QGIS process started (seconds since the epoch); a Flatpak permission
+    granted after that only takes effect once QGIS is started again."""
+    try:
+        with open("/proc/self/stat", encoding="ascii") as f:
+            ticks = int(f.read().rsplit(")", 1)[1].split()[19])
+        with open("/proc/stat", encoding="ascii") as f:
+            boot = next(int(line.split()[1]) for line in f if line.startswith("btime"))
+        return boot + ticks / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError, StopIteration):
+        return _IMPORTED_AT
+
+
+_IMPORTED_AT = time.time()
 
 
 def _menu_action(menu, icon, text, slot):
@@ -155,6 +173,10 @@ class GeoGitDock(QgsDockWidget):
         self.btn_copy_cmd.clicked.connect(self._copy_flatpak_command)
         self.btn_copy_cmd.hide()
         l0.addWidget(self.btn_copy_cmd)
+        self.btn_close_qgis = QPushButton(_icon("/mActionFileExit.svg"), "")
+        self.btn_close_qgis.clicked.connect(self._close_qgis)
+        self.btn_close_qgis.hide()
+        l0.addWidget(self.btn_close_qgis)
         l0.addWidget(self.btn_init)
         l0.addStretch(1)
         self.stack.addWidget(p0)
@@ -199,6 +221,21 @@ class GeoGitDock(QgsDockWidget):
         for b in (self.btn_pull, self.btn_push, self.btn_refresh):
             sync.addWidget(b)
         l1.addLayout(sync)
+
+        self.lfs_bar = QFrame()
+        self.lfs_bar.setFrameShape(QFrame.Shape.StyledPanel)
+        self.lfs_bar.setAutoFillBackground(True)
+        pal = self.lfs_bar.palette()
+        pal.setColor(QPalette.ColorRole.Window, QColor(8, 145, 178, 35))
+        self.lfs_bar.setPalette(pal)
+        lb = QHBoxLayout(self.lfs_bar)
+        self.lfs_label = WrapLabel()
+        self.btn_lfs_install = QPushButton(_icon("/mActionAdd.svg"), "")
+        self.btn_lfs_install.clicked.connect(lambda: self.offer_lfs_install())
+        lb.addWidget(self.lfs_label, 1)
+        lb.addWidget(self.btn_lfs_install)
+        self.lfs_bar.hide()
+        l1.addWidget(self.lfs_bar)
 
         self.tabs = QTabWidget()
         l1.addWidget(self.tabs, 1)
@@ -349,6 +386,9 @@ class GeoGitDock(QgsDockWidget):
         self.not_repo_label.setText(t("not_repo"))
         self.btn_init.setText(t("init"))
         self.btn_copy_cmd.setText(t("copy_command"))
+        self.btn_close_qgis.setText(t("close_qgis"))
+        self.lfs_label.setText(t("lfs_missing_bar"))
+        self.btn_lfs_install.setText(t("lfs_install_btn"))
         self.branch_label.setText(t("branch") + ":")
         self.btn_new_branch.setToolTip(t("new_branch"))
         self.btn_merge.setText(t("merge"))
@@ -423,24 +463,39 @@ class GeoGitDock(QgsDockWidget):
         self.btn_project_folder.setEnabled(bool(QgsProject.instance().absolutePath()))
         if not gb.git_available():
             mode = gb.git_mode()
+            restart = False
             if mode == "flatpak-no-permission":
-                text = t("no_git_flatpak", gb.FLATPAK_PERMISSION_CMD.format(app=gb.flatpak_app_id()))
+                cmd = gb.FLATPAK_PERMISSION_CMD.format(app=gb.flatpak_app_id())
+                copied = float(QgsSettings().value(SETTINGS_FLATPAK_COPIED, 0) or 0)
+                if copied and copied >= _process_start():
+                    # copied in this QGIS: the permission can only arrive with a new start
+                    text, restart = t("flatpak_restart", cmd), True
+                elif copied:
+                    text = t("flatpak_not_applied", cmd)
+                else:
+                    text = t("no_git_flatpak", cmd)
             elif gb.in_flatpak():
                 text = t("no_git_host")
             else:
                 text = t("no_git")
             self.not_repo_label.setText(text)
             self.btn_copy_cmd.setVisible(mode == "flatpak-no-permission")
+            self.btn_close_qgis.setVisible(restart)
             self.btn_init.setEnabled(False)
             self.stack.setCurrentIndex(0)
             return
         self.btn_copy_cmd.hide()
+        self.btn_close_qgis.hide()
+        if gb.git_mode() == "host" and QgsSettings().contains(SETTINGS_FLATPAK_COPIED):
+            QgsSettings().remove(SETTINGS_FLATPAK_COPIED)
+            self.iface.messageBar().pushMessage("GeoGit", t("flatpak_ready"), Qgis.MessageLevel.Success, 10)
         if not self.repo:
             self.not_repo_label.setText(t("not_repo") if has_folder else t("no_folder"))
             self.btn_init.setEnabled(has_folder)
             self.stack.setCurrentIndex(0)
             return
         self.stack.setCurrentIndex(1)
+        self.lfs_bar.setVisible(not self._lfs)
         try:
             self._fill_changes(force=full)
             self._fill_branch()
@@ -1002,7 +1057,17 @@ class GeoGitDock(QgsDockWidget):
     def _copy_flatpak_command(self):
         """A Flatpak cannot grant itself the permission, so hand the command to the user."""
         QApplication.clipboard().setText(gb.FLATPAK_PERMISSION_CMD.format(app=gb.flatpak_app_id()))
+        QgsSettings().setValue(SETTINGS_FLATPAK_COPIED, time.time())
         self.iface.messageBar().pushMessage("GeoGit", t("command_copied"), Qgis.MessageLevel.Info, 15)
+        self.refresh()
+
+    def _close_qgis(self):
+        """Quit QGIS the normal way (it asks about an unsaved project) so it can be started again."""
+        exit_action = getattr(self.iface, "actionExit", None)
+        if exit_action is not None:
+            exit_action().trigger()
+        else:
+            self.iface.mainWindow().close()
 
     def _choose_folder(self):
         path = QFileDialog.getExistingDirectory(self, t("folder"), self.folder)
@@ -1010,15 +1075,76 @@ class GeoGitDock(QgsDockWidget):
             self.set_folder(path)
 
     def _init_repo(self):
+        if not gb.GitRepo(self.folder).lfs_available():
+            # large rasters and GeoPackages should go to LFS from the first version
+            choice = self.offer_lfs_install(then=self._do_init, allow_without=True)
+            if choice != "without":
+                return
+        self._do_init()
+
+    def _do_init(self):
         repo = gb.GitRepo(self.folder)
         try:
             repo.init()
         except gb.GitError as e:
             self._show_error(e)
             return
-        if not repo.lfs_available():
-            QMessageBox.information(self, "Git LFS", t("no_lfs"))
         self.set_folder(self.folder)
+
+    # --- git-lfs installation --------------------------------------------
+    def offer_lfs_install(self, then=None, allow_without=False):
+        """Ask before installing git-lfs; returns "install", "copy", "without" or "cancel"."""
+        plan = gb.lfs_install_plan()
+        box = QMessageBox(self)
+        box.setWindowTitle("Git LFS")
+        box.setIcon(QMessageBox.Icon.Question)
+        text = t("lfs_offer_init" if allow_without else "lfs_offer", plan["command"])
+        if plan["argv"] is None:
+            text += "\n\n" + t("lfs_manual")
+        elif plan["needs_password"]:
+            text += "\n\n" + t("lfs_password")
+        box.setText(text)
+        b_install = box.addButton(t("lfs_install"), QMessageBox.ButtonRole.AcceptRole) if plan["argv"] else None
+        b_copy = box.addButton(t("copy_command"), QMessageBox.ButtonRole.ActionRole)
+        b_without = box.addButton(t("lfs_without"), QMessageBox.ButtonRole.DestructiveRole) if allow_without else None
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if b_install is not None and clicked is b_install:
+            self._run(t("lfs_installing"), lambda: gb.install_lfs(plan), t("lfs_installed"),
+                      after=lambda _: self._after_lfs_install(then),
+                      on_error=lambda e: self._lfs_install_failed(e, plan), quiet=True)
+            return "install"
+        if clicked is b_copy:
+            QApplication.clipboard().setText(plan["command"])
+            self.iface.messageBar().pushMessage("GeoGit", t("lfs_copied"), Qgis.MessageLevel.Info, 15)
+            return "copy"
+        if b_without is not None and clicked is b_without:
+            return "without"
+        return "cancel"
+
+    def _lfs_install_failed(self, error, plan):
+        QApplication.clipboard().setText(plan["command"])
+        QMessageBox.warning(self, "Git LFS", t("lfs_install_failed", error, plan["command"]))
+
+    def _after_lfs_install(self, then=None):
+        """git-lfs is now on the computer: switch it on for the open repository too."""
+        if self.repo is not None and self.repo.lfs_available():
+            try:
+                with open(os.path.join(self.repo.path, ".gitattributes"), encoding="utf-8") as f:
+                    has_rules = "filter=lfs" in f.read()
+            except OSError:
+                has_rules = False
+            try:
+                self.repo.setup_lfs() if not has_rules else self.repo.enable_lfs()
+            except gb.GitError as e:
+                self._show_error(e)
+        self._lfs = self.repo.lfs_available() if self.repo is not None else True
+        if then is not None:
+            then()
+        else:
+            self.refresh()
+            self.load_locks()
 
     def _clone(self):
         url, ok = QInputDialog.getText(self, t("clone"), t("clone_url"))
@@ -1131,6 +1257,8 @@ class GeoGitDock(QgsDockWidget):
         self._run(t("push"), self.repo.push, t("pushed"), after=lambda _: self.load_locks())
 
     def _refresh_and_fetch(self):
+        if self.repo is not None and not self._lfs and self.repo.lfs_available():
+            self._after_lfs_install()      # git-lfs was installed by hand meanwhile
         self.refresh()
         if self.repo and self.repo.remote_url():
             self._run(t("refresh"), self.repo.fetch, after=lambda _: self.load_locks())

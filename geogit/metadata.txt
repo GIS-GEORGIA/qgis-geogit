@@ -7,7 +7,7 @@ description=Version control for a whole QGIS project folder (git + Git LFS): sav
 description[ka]=მთელი QGIS პროექტის საქაღალდის ვერსიონირება (git + Git LFS): ვერსიის შენახვა, სერვერზე გამოქვეყნება და მოტანა, ვინ რა შეცვალა, ვექტორის, რასტრის და პროექტის ვერსიების შედარება რუკაზე, GeoPackage-ის შერწყმა ობიექტების დონეზე. ორენოვანია (KA/EN).
 about=Puts the project folder (project file, vector and raster layers, styles, documents) under git with Git LFS for large geodata and drives it from a QGIS panel: changed files, versions, branches, publish/get updates with GitHub, Forgejo or any git server, and a history graph coloured by author with filters. Double-click a file to compare versions: vector layers show added, modified and deleted features on the map; rasters get a difference layer, outlines of changed areas and a swipe tool; project files list changed layers, styles, layer tree and layouts. Merges combine GeoPackage edits feature by feature and attribute by attribute, with a window for the conflicts that remain. Git LFS file locks show who is editing what. Needs git (and git-lfs for large files and locks). License: GPL-3.0-or-later.
 about[ka]=პროექტის საქაღალდეს (პროექტის ფაილი, ვექტორული და რასტრული ფენები, სტილები, დოკუმენტები) აყენებს git-ის კონტროლზე, დიდ გეო-მონაცემებს ინახავს Git LFS-ით და ყველაფერს მართავს QGIS-ის პანელიდან: შეცვლილი ფაილები, ვერსიები, ბრენჩები, GitHub-ზე, Forgejo-ზე ან ნებისმიერ git სერვერზე გამოქვეყნება და მოტანა, ისტორიის ხე ავტორების ფერებით და ფილტრებით. ფაილზე ორჯერ დაწკაპუნებით ვერსიები დარდება: ვექტორზე რუკაზე ჩანს დამატებული, შეცვლილი და წაშლილი ობიექტები; რასტრზე სხვაობის ფენა, შეცვლილი უბნები და swipe; პროექტის ფაილზე შეცვლილი ფენები, სტილები, ფენების ხე და layout-ები. შერწყმისას GeoPackage-ის ცვლილებები ობიექტებისა და ველების დონეზე ერთიანდება, დარჩენილი კონფლიქტებისთვის კი ცალკე ფანჯარაა. Git LFS-ის დაბლოკვებით ჩანს, ვინ რომელ ფაილზე მუშაობს. სჭირდება git (დიდი ფაილებისა და დაბლოკვისთვის git-lfs). ლიცენზია: GPL-3.0-or-later.
-version=0.7.5
+version=0.7.6
 author=GIS GEORGIA | Giorgi Kapanadze
 email=aigroegsig@gmail.com
 tags=git,version-control,versioning,history,collaboration,lfs,georgian
@@ -17,7 +17,8 @@ repository=https://github.com/GIS-GEORGIA/qgis-geogit
 category=Plugins
 icon=icon.svg
 experimental=True
-changelog=0.7.5 - Flatpak QGIS without the git permission: a “Copy the command” button puts the one-time flatpak override command on the clipboard (a Flatpak cannot grant it itself), with clearer steps.
+changelog=0.7.6 - git-lfs: offered before the first version and from a bar in the panel; installs after consent (pkexec asks for the password in the system dialog; apt, dnf, pacman, zypper, brew) and switches LFS on for the open repository, or copies the command. Flatpak: after copying the permission command the panel says to restart QGIS, has a Close QGIS button, tells when the command did not take effect and confirms when git is reachable.
+    0.7.5 - Flatpak QGIS without the git permission: a “Copy the command” button puts the one-time flatpak override command on the clipboard (a Flatpak cannot grant it itself), with clearer steps.
     0.7.4 - Works in the Flatpak QGIS: git (and git-lfs) are run on the computer through flatpak-spawn; without that permission the panel shows the one command that grants it.
     0.7.3 - Field types always use QMetaType (clean under the Qt6 compatibility scan); first release on plugins.qgis.ge.
     0.7.2 - Tested on QGIS 3.44 (Qt5), 4.0 and 4.2 (Qt6): QAction import, menu actions, enum use and layer-tree checks made Qt6-safe (on QGIS 4.0 the old raster version stayed visible). Minimum QGIS is now 3.44.

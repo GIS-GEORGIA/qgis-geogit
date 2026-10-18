@@ -68,9 +68,51 @@ STRINGS = {
                        "this once in a terminal (“Copy the command” button), then restart QGIS:\n\n{0}\n\nIt lets QGIS run commands on the computer (that is how it calls "
                        "git)."),
     "copy_command": ("ბრძანების კოპირება", "Copy the command"),
-    "command_copied": ("ბრძანება დაკოპირდა. გახსენი ტერმინალი, ჩასვი (Ctrl+Shift+V), დააჭირე Enter და გადატვირთე "
-                       "QGIS.",
-                       "Command copied. Open a terminal, paste it (Ctrl+Shift+V), press Enter, then restart QGIS."),
+    "command_copied": ("ბრძანება დაკოპირდა. გახსენი ტერმინალი, ჩასვი (Ctrl+Shift+V), დააჭირე Enter, მერე "
+                       "დახურე და თავიდან გახსენი QGIS.",
+                       "Command copied. Open a terminal, paste it (Ctrl+Shift+V), press Enter, then close and reopen "
+                       "QGIS."),
+    "flatpak_restart": ("ბოლო ნაბიჯი: ბრძანება ტერმინალში თუ გაუშვი, ახლა QGIS უნდა გადატვირთო. Flatpak ახალ უფლებას "
+                        "მხოლოდ ახალ გაშვებაზე იღებს. დააჭირე „QGIS-ის დახურვა“ და თავიდან გახსენი.\n\nჯერ არ გაგიშვია? "
+                        "ჩასვი ტერმინალში (Ctrl+Shift+V) და დააჭირე Enter:\n{0}",
+                        "Last step: if you ran the command in a terminal, QGIS now has to be restarted. A Flatpak gets "
+                        "a new permission only when it starts again. Press “Close QGIS” and open it again.\n\nNot run "
+                        "yet? Paste it in a terminal (Ctrl+Shift+V) and press Enter:\n{0}"),
+    "flatpak_not_applied": ("QGIS გადაიტვირთა, მაგრამ git-ზე წვდომა ჯერ არ აქვს. როგორც ჩანს, ბრძანება ტერმინალში ვერ "
+                            "გაეშვა. დააკოპირე ისევ, ჩასვი ტერმინალში, დააჭირე Enter და ხელახლა გადატვირთე QGIS:\n\n{0}",
+                            "QGIS was restarted but still cannot reach git, so the command does not seem to have run. "
+                            "Copy it again, paste it in a terminal, press Enter and restart QGIS once more:\n\n{0}"),
+    "flatpak_ready": ("მზადაა ✔ QGIS ახლა კომპიუტერის git-ს ხედავს. შეგიძლია ვერსიონირება ჩართო.",
+                      "Ready ✔ QGIS can now reach the computer's git. You can start versioning."),
+    "close_qgis": ("QGIS-ის დახურვა", "Close QGIS"),
+    "lfs_missing_bar": ("git-lfs არ არის დაყენებული: დიდი რასტრები და GeoPackage ჩვეულებრივ git-ში ინახება "
+                        "(რეპო სწრაფად იზრდება) და დაბლოკვა არ მუშაობს.",
+                        "git-lfs is not installed: large rasters and GeoPackages go into plain git (the repository "
+                        "grows fast) and locks do not work."),
+    "lfs_install_btn": ("git-lfs-ის დაყენება...", "Install git-lfs..."),
+    "lfs_offer": ("git-lfs არ არის დაყენებული. ის დიდ რასტრებს და GeoPackage-ს ცალკე ინახავს და ფაილების დაბლოკვას "
+                  "ამუშავებს.\n\nდავაყენო? ბრძანება:\n{0}",
+                  "git-lfs is not installed. It keeps large rasters and GeoPackages apart and makes file locks "
+                  "work.\n\nInstall it? Command:\n{0}"),
+    "lfs_offer_init": ("ვერსიონირებამდე სჯობს git-lfs-ის დაყენება: მის გარეშე დიდი რასტრები და GeoPackage ჩვეულებრივ "
+                       "git-ში ჩაიწერება და რეპო ძალიან გაიზრდება.\n\nდავაყენო ახლა? ბრძანება:\n{0}",
+                       "Install git-lfs before versioning: without it large rasters and GeoPackages go into plain "
+                       "git and the repository grows a lot.\n\nInstall it now? Command:\n{0}"),
+    "lfs_password": ("პაროლს სისტემის ფანჯარა მოგთხოვს (QGIS მას ვერ ხედავს).",
+                     "The system will ask for your password in its own window (QGIS never sees it)."),
+    "lfs_manual": ("აქედან ავტომატურად ვერ დავაყენებ: დააკოპირე ბრძანება და გაუშვი ტერმინალში.",
+                   "It cannot be installed from here: copy the command and run it in a terminal."),
+    "lfs_install": ("დაყენება", "Install"),
+    "lfs_without": ("გაგრძელება მის გარეშე", "Continue without it"),
+    "lfs_installing": ("git-lfs-ის დაყენება", "Installing git-lfs"),
+    "lfs_installed": ("git-lfs დაყენდა ✔ დიდი ფაილები ახლა LFS-ში შეინახება.",
+                      "git-lfs installed ✔ Large files now go to LFS."),
+    "lfs_install_failed": ("git-lfs ვერ დაყენდა: {0}\n\nბრძანება დაკოპირდა: ჩასვი ტერმინალში (Ctrl+Shift+V) და "
+                           "დააჭირე Enter:\n{1}",
+                           "git-lfs could not be installed: {0}\n\nThe command is copied: paste it in a terminal "
+                           "(Ctrl+Shift+V) and press Enter:\n{1}"),
+    "lfs_copied": ("ბრძანება დაკოპირდა. ჩასვი ტერმინალში (Ctrl+Shift+V), დააჭირე Enter და მერე პანელში „განახლება“.",
+                   "Command copied. Paste it in a terminal (Ctrl+Shift+V), press Enter, then “Refresh” in the panel."),
     "no_git_host": ("კომპიუტერზე git არ არის დაყენებული (მაგ. sudo apt install git git-lfs). დააყენე და QGIS "
                     "გადატვირთე.",
                     "git is not installed on the computer (e.g. sudo apt install git git-lfs). Install it and "

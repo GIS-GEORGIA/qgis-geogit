@@ -26,7 +26,7 @@ for tag in "$@"; do
         fail=0
         python3 -W ignore -m unittest discover -s tests 2>&1 | tail -1 | sed "s/^/unit: /" | grep -q "unit: OK" \
             && echo "unit: OK" || { echo "unit: FAILED"; python3 -W ignore -m unittest discover -s tests 2>&1 | tail -30; fail=1; }
-        for s in smoke_qgis smoke_diff smoke_raster smoke_project smoke_merge smoke_tools; do
+        for s in smoke_qgis smoke_diff smoke_raster smoke_project smoke_merge smoke_tools smoke_lfs_install; do
             out=$(timeout 300 python3 -W ignore tests/$s.py 2>&1)
             # Qt6 may print QThreadStorage notes after the last line, so look for the result anywhere
             if echo "$out" | grep -q "SMOKE OK$"; then echo "$s: OK"; else echo "$s: FAILED"
