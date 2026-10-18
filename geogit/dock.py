@@ -9,7 +9,7 @@ from qgis.core import (Qgis, QgsApplication, QgsCoordinateTransform, QgsCsExcept
 from qgis.gui import QgsDockWidget
 from qgis.PyQt.QtCore import Qt, QTimer, QUrl
 from qgis.PyQt.QtGui import QBrush, QColor, QDesktopServices, QIcon, QPalette
-from qgis.PyQt.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
+from qgis.PyQt.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout,
                                  QHeaderView, QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox,
                                  QPlainTextEdit, QPushButton, QSplitter, QStackedWidget, QTabWidget,
                                  QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
@@ -54,7 +54,7 @@ class WrapLabel(QLabel):
         self.setWordWrap(True)
 
     def _fit(self):
-        self.setMinimumHeight(self.heightForWidth(max(self.width(), 50)))
+        self.setMinimumHeight(max(0, self.heightForWidth(max(self.width(), 50))))   # -1 while empty
 
     def setText(self, text):
         super().setText(text)
@@ -151,6 +151,10 @@ class GeoGitDock(QgsDockWidget):
         self.btn_init = QPushButton(_icon("/mActionAdd.svg"), "")
         self.btn_init.clicked.connect(self._init_repo)
         l0.addWidget(self.not_repo_label)
+        self.btn_copy_cmd = QPushButton(_icon("/mActionEditCopy.svg"), "")
+        self.btn_copy_cmd.clicked.connect(self._copy_flatpak_command)
+        self.btn_copy_cmd.hide()
+        l0.addWidget(self.btn_copy_cmd)
         l0.addWidget(self.btn_init)
         l0.addStretch(1)
         self.stack.addWidget(p0)
@@ -344,6 +348,7 @@ class GeoGitDock(QgsDockWidget):
         self.btn_clone.setText(t("clone"))
         self.not_repo_label.setText(t("not_repo"))
         self.btn_init.setText(t("init"))
+        self.btn_copy_cmd.setText(t("copy_command"))
         self.branch_label.setText(t("branch") + ":")
         self.btn_new_branch.setToolTip(t("new_branch"))
         self.btn_merge.setText(t("merge"))
@@ -425,9 +430,11 @@ class GeoGitDock(QgsDockWidget):
             else:
                 text = t("no_git")
             self.not_repo_label.setText(text)
+            self.btn_copy_cmd.setVisible(mode == "flatpak-no-permission")
             self.btn_init.setEnabled(False)
             self.stack.setCurrentIndex(0)
             return
+        self.btn_copy_cmd.hide()
         if not self.repo:
             self.not_repo_label.setText(t("not_repo") if has_folder else t("no_folder"))
             self.btn_init.setEnabled(has_folder)
@@ -992,6 +999,11 @@ class GeoGitDock(QgsDockWidget):
         QMessageBox.warning(self, t("error"), text)
 
     # --- actions -------------------------------------------------------
+    def _copy_flatpak_command(self):
+        """A Flatpak cannot grant itself the permission, so hand the command to the user."""
+        QApplication.clipboard().setText(gb.FLATPAK_PERMISSION_CMD.format(app=gb.flatpak_app_id()))
+        self.iface.messageBar().pushMessage("GeoGit", t("command_copied"), Qgis.MessageLevel.Info, 15)
+
     def _choose_folder(self):
         path = QFileDialog.getExistingDirectory(self, t("folder"), self.folder)
         if path:

@@ -60,12 +60,17 @@ STRINGS = {
     "identity_email": ("შენი ელფოსტა:", "Your e-mail:"),
     "no_git": ("git ვერ ვიპოვე. დააყენე git და გადატვირთე QGIS.",
                "git was not found. Install git and restart QGIS."),
-    "no_git_flatpak": ("ეს QGIS Flatpak-ით არის დაყენებული და კომპიუტერის git-ს ვერ ხედავს. ტერმინალში ერთხელ "
-                       "გაუშვი ეს ბრძანება და მერე QGIS გადატვირთე:\n\n{0}\n\nეს QGIS-ს კომპიუტერზე ბრძანებების "
+    "no_git_flatpak": ("ეს QGIS Flatpak-ით არის დაყენებული და კომპიუტერის git-ს ვერ ხედავს. Flatpak-ს ეს "
+                       "უფლება თავად ვერ მიეცემა: ტერმინალში ერთხელ გაუშვი ეს ბრძანება (ღილაკი „ბრძანების კოპირება“) და "
+                       "მერე QGIS გადატვირთე:\n\n{0}\n\nეს QGIS-ს კომპიუტერზე ბრძანებების "
                        "გაშვების უფლებას აძლევს (ასე იძახებს git-ს).",
-                       "This QGIS is a Flatpak and cannot see the computer's git. Run this once in a terminal, then "
-                       "restart QGIS:\n\n{0}\n\nIt lets QGIS run commands on the computer (that is how it calls "
+                       "This QGIS is a Flatpak and cannot see the computer's git. A Flatpak cannot grant this itself: run "
+                       "this once in a terminal (“Copy the command” button), then restart QGIS:\n\n{0}\n\nIt lets QGIS run commands on the computer (that is how it calls "
                        "git)."),
+    "copy_command": ("ბრძანების კოპირება", "Copy the command"),
+    "command_copied": ("ბრძანება დაკოპირდა. გახსენი ტერმინალი, ჩასვი (Ctrl+Shift+V), დააჭირე Enter და გადატვირთე "
+                       "QGIS.",
+                       "Command copied. Open a terminal, paste it (Ctrl+Shift+V), press Enter, then restart QGIS."),
     "no_git_host": ("კომპიუტერზე git არ არის დაყენებული (მაგ. sudo apt install git git-lfs). დააყენე და QGIS "
                     "გადატვირთე.",
                     "git is not installed on the computer (e.g. sudo apt install git git-lfs). Install it and "
