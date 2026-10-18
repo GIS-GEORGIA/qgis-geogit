@@ -2,7 +2,10 @@ import os
 
 from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction
+try:                                    # Qt6 (QGIS 4) moved QAction to QtGui
+    from qgis.PyQt.QtGui import QAction
+except ImportError:                     # Qt5 (QGIS 3)
+    from qgis.PyQt.QtWidgets import QAction
 
 from . import i18n
 
@@ -25,7 +28,7 @@ class GeoGitPlugin:
         self.iface.addPluginToMenu(MENU, self.action)
 
     def unload(self):
-        if self.dock:
+        if self.dock is not None:
             self.dock.cleanup()
             self.iface.removeDockWidget(self.dock)
             self.dock.deleteLater()

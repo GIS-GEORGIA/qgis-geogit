@@ -6,7 +6,9 @@ from qgis.PyQt.QtWidgets import QStyle, QStyledItemDelegate
 
 from . import graph
 
-GRAPH_ROLE = Qt.ItemDataRole.UserRole + 1
+_USER_ROLE = Qt.ItemDataRole.UserRole
+# PyQt6 enums are not always ints, so take the number before adding to it
+GRAPH_ROLE = getattr(_USER_ROLE, "value", _USER_ROLE) + 1
 LANE_W = 14
 NODE_R = 4.5
 

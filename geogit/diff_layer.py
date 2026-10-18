@@ -110,7 +110,7 @@ def add_to_project(layers, group_name):
     """Put the diff layers in a fresh group at the top of the layer tree."""
     root = QgsProject.instance().layerTreeRoot()
     old = root.findGroup(group_name)
-    if old:
+    if old is not None:      # QGIS 4.0: an empty group counts as False
         root.removeChildNode(old)
     group = root.insertGroup(0, group_name)
     for layer in layers:

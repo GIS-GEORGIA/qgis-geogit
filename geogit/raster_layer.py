@@ -53,13 +53,13 @@ def build_layers(main, label, old_path, new_path, diff):
         out.append((d, True))
     new_layer = QgsRasterLayer(new_path, f"{name} · {t('raster_new')} ({label})") if new_path else None
     old_layer = QgsRasterLayer(old_path, f"{name} · {t('raster_old')}") if old_path else None
-    if new_layer and old_layer and new_layer.isValid() and old_layer.isValid() \
+    if new_layer is not None and old_layer is not None and new_layer.isValid() and old_layer.isValid() \
             and new_layer.bandCount() == old_layer.bandCount():
         # same colours and stretch on both sides, or swipe would show contrast, not change
         old_layer.setRenderer(new_layer.renderer().clone())
-    if new_layer:
+    if new_layer is not None:
         out.append((new_layer, True))
-    if old_layer:
+    if old_layer is not None:
         out.append((old_layer, not new_layer))
     return [(lyr, vis) for lyr, vis in out if lyr.isValid()]
 
@@ -112,17 +112,17 @@ class SwipeMapTool(QgsMapTool):
             self.canvas().mapCanvasRefreshed.disconnect(self._render)
         except TypeError:
             pass
-        if self.job:
+        if self.job is not None:
             self.job.cancelWithoutBlocking()
             self.job = None
-        if self.item:
+        if self.item is not None:
             self.canvas().scene().removeItem(self.item)
             self.item = None
         super().deactivate()
 
     def _render(self):
         old, self.job = self.job, None
-        if old:
+        if old is not None:
             old.cancelWithoutBlocking()   # may emit finished right away; _rendered ignores it
         settings = self.canvas().mapSettings()
         settings.setLayers([lyr for lyr in self.layers if lyr is not None])
@@ -135,14 +135,14 @@ class SwipeMapTool(QgsMapTool):
     def _rendered(self, job):
         if job is not self.job:
             return
-        if self.item:
+        if self.item is not None:
             self.item.image = job.renderedImage()
             self.item.update()
         self.job = None
 
     def canvasMoveEvent(self, e):
-        if self.item:
-            self.item.x = e.pos().x()
+        if self.item is not None:
+            self.item.x = e.pixelPoint().x()
             self.item.update()
 
     def canvasReleaseEvent(self, e):
@@ -150,5 +150,6 @@ class SwipeMapTool(QgsMapTool):
             self.canvas().unsetMapTool(self)
 
     def keyPressEvent(self, e):
-        if e.key() == Qt.Key.Key_Escape:
+        esc = Qt.Key.Key_Escape
+        if e.key() == getattr(esc, "value", esc):   # key() is an int in PyQt6
             self.canvas().unsetMapTool(self)

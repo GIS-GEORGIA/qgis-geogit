@@ -30,6 +30,13 @@ def _icon(name):
     return QgsApplication.getThemeIcon(name)
 
 
+def _menu_action(menu, icon, text, slot):
+    """menu.addAction(icon, text, slot) without relying on that overload (not in every PyQt6)."""
+    action = menu.addAction(icon, text)
+    action.triggered.connect(lambda *_: slot())
+    return action
+
+
 KIND_ICONS = {"vector": "/mIconVector.svg", "raster": "/mIconRaster.svg",
               "project": "/mIconQgsProjectFile.svg", "style": "/mIconPaintEffects.svg",
               "other": "/mIconFile.svg"}
@@ -542,32 +549,32 @@ class GeoGitDock(QgsDockWidget):
 
     def _file_menu(self, tree, pos):
         item = tree.itemAt(pos)
-        if not item or not self.repo:
+        if item is None or not self.repo:
             return
         path = item.data(0, PATH_ROLE)
         menu = QMenu(tree)
         if gb.vector_main_file(path) or gb.raster_main_file(path) or gb.file_kind(path) == "project":
             sha = self._selected_sha() if tree is self.commit_files else None
-            menu.addAction(_icon("/mActionShowAllLayers.svg"), t("show_on_map"),
+            _menu_action(menu, _icon("/mActionShowAllLayers.svg"), t("show_on_map"),
                            lambda: self.show_changes(path, sha))
-        menu.addAction(_icon("/mActionHistory.svg"), t("show_file_history"),
+        _menu_action(menu, _icon("/mActionHistory.svg"), t("show_file_history"),
                        lambda: self.show_file_history(path))
         if tree is self.commit_files and self._selected_sha():
             sha = self._selected_sha()
             if gb.vector_main_file(path) or gb.raster_main_file(path):
-                menu.addAction(_icon("/mActionAddLayer.svg"), t("load_version"),
+                _menu_action(menu, _icon("/mActionAddLayer.svg"), t("load_version"),
                                lambda: self.load_version(path, sha))
-            menu.addAction(_icon("/mActionUndo.svg"), t("restore"), lambda: self.restore_version(path, sha))
+            _menu_action(menu, _icon("/mActionUndo.svg"), t("restore"), lambda: self.restore_version(path, sha))
         if self._locks_usable():
             menu.addSeparator()
             lk = self._locks.get(path)
             if lk is None:
-                menu.addAction(_icon("/locked.svg"), t("lock"), lambda: self.lock_file(path))
+                _menu_action(menu, _icon("/locked.svg"), t("lock"), lambda: self.lock_file(path))
             elif lk.ours is False:
-                menu.addAction(_icon("/unlocked.svg"), t("unlock_force", lk.owner),
+                _menu_action(menu, _icon("/unlocked.svg"), t("unlock_force", lk.owner),
                                lambda: self.unlock_file(path, force=True))
             else:
-                menu.addAction(_icon("/unlocked.svg"), t("unlock"), lambda: self.unlock_file(path))
+                _menu_action(menu, _icon("/unlocked.svg"), t("unlock"), lambda: self.unlock_file(path))
         menu.exec(tree.viewport().mapToGlobal(pos))
 
     # --- LFS locks -----------------------------------------------------
@@ -640,7 +647,7 @@ class GeoGitDock(QgsDockWidget):
 
     def _unlock_selected(self):
         item = self.locks_tree.currentItem()
-        if item:
+        if item is not None:
             path = item.data(0, PATH_ROLE)
             lk = self._locks.get(path)
             self.unlock_file(path, force=bool(lk and lk.ours is False))
@@ -648,15 +655,15 @@ class GeoGitDock(QgsDockWidget):
     # --- history tools -------------------------------------------------
     def _history_menu(self, pos):
         item = self.history.itemAt(pos)
-        if not item or not self.repo:
+        if item is None or not self.repo:
             return
         sha = item.data(1, PATH_ROLE)
         subject = next((c.subject for c in self._commits if c.sha == sha), sha[:8])
         menu = QMenu(self.history)
-        menu.addAction(_icon("/mActionLabeling.svg"), t("tag"), lambda: self.tag_version(sha))
-        menu.addAction(_icon("/mActionFileOpen.svg"), t("report"), lambda: self.report_version(sha))
+        _menu_action(menu, _icon("/mActionLabeling.svg"), t("tag"), lambda: self.tag_version(sha))
+        _menu_action(menu, _icon("/mActionFileOpen.svg"), t("report"), lambda: self.report_version(sha))
         menu.addSeparator()
-        menu.addAction(_icon("/mActionUndo.svg"), t("revert"), lambda: self.revert_version(sha, subject))
+        _menu_action(menu, _icon("/mActionUndo.svg"), t("revert"), lambda: self.revert_version(sha, subject))
         menu.exec(self.history.viewport().mapToGlobal(pos))
 
     def tag_version(self, sha):
@@ -730,7 +737,7 @@ class GeoGitDock(QgsDockWidget):
 
     def _selected_sha(self):
         item = self.history.currentItem()
-        return item.data(1, PATH_ROLE) if item else None
+        return item.data(1, PATH_ROLE) if item is not None else None
 
     def _file_double_clicked(self, tree, item):
         path = item.data(0, PATH_ROLE)
@@ -805,7 +812,7 @@ class GeoGitDock(QgsDockWidget):
         group = add_to_project([lyr for lyr, _ in layers], f"GeoGit: {path} · {label}")
         for lyr, visible in layers:
             node = group.findLayer(lyr.id())
-            if node:
+            if node is not None:      # QGIS 4.0: a layer node counts as False (no children)
                 node.setItemVisibilityChecked(visible)
         if diff is None:
             bar.pushMessage("GeoGit", t("raster_only_one", path), Qgis.MessageLevel.Info, 8)
@@ -898,7 +905,7 @@ class GeoGitDock(QgsDockWidget):
 
     def _commit_selected(self, item, _prev=None):
         self.commit_files.clear()
-        if not item or not self.repo:
+        if item is None or not self.repo:
             return
         try:
             files = self.repo.commit_files(item.data(1, PATH_ROLE))

@@ -139,10 +139,10 @@ class ConflictDialog(QDialog):
 
     def _current(self):
         it = self.files.currentItem()
-        return it.data(0, PATH_ROLE) if it else None
+        return it.data(0, PATH_ROLE) if it is not None else None
 
     def _selected(self, item, _prev=None):
-        path = item.data(0, PATH_ROLE) if item else None
+        path = item.data(0, PATH_ROLE) if item is not None else None
         for b in (self.btn_ours, self.btn_theirs):
             b.setEnabled(bool(path))
         mergeable = bool(path) and os.path.splitext(path)[1].lower() in (".gpkg", ".sqlite")

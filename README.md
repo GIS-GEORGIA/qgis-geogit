@@ -17,7 +17,7 @@
 - ქართული და ინგლისური ინტერფეისი
 
 ## მოთხოვნები
-- QGIS 3.34+ (Qt5 ან Qt6)
+- QGIS 3.44 LTR (Qt5) ან QGIS 4.x (Qt6); გატესტილია 3.44, 4.0 და 4.2 ვერსიებზე
 - `git`; დიდი ფაილებისა და დაბლოკვისთვის `git-lfs` (`sudo apt install git-lfs`)
 - GitHub-ისთვის ერთხელ: `gh auth login && gh auth setup-git`
 
@@ -41,6 +41,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/smoke_project.py # პროექტი
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_merge.py   # pull კონფლიქტით, შერწყმა და დასრულება
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_tools.py   # tag, ანგარიში, აღდგენა, revert, ძველი ვერსია რუკაზე
 python3 tests/server_e2e.py                              # ორი მომხმარებელი ლოკალურ Forgejo-ზე
+scripts/test_in_docker.sh 3.44 4.0 4.2                   # ყველა ტესტი QGIS-ის ოფიციალურ docker image-ებში
 ```
 
 ---
@@ -62,7 +63,7 @@ Puts a whole project folder (`.qgz`, vector and raster layers, styles, documents
 - Georgian and English interface
 
 ## Requirements
-QGIS 3.34+ (Qt5 or Qt6), `git`, and `git-lfs` for large files and locks.
+QGIS 3.44 LTR (Qt5) or QGIS 4.x (Qt6), tested on 3.44, 4.0 and 4.2; `git`, and `git-lfs` for large files and locks.
 
 ## Own server
 `server/` holds a Forgejo 15 (LTS) setup with Git LFS and locks: `docker compose up -d`, then `./setup_users.sh`.
