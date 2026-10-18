@@ -3,12 +3,14 @@
 No QGIS imports here, so the module runs (and is tested) outside QGIS.
 """
 
+import contextlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, field
 
 VECTOR_EXT = {".gpkg", ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".geojson", ".json",
@@ -142,6 +144,44 @@ def dataset_members(path):
 
 
 GIT_ENV = {"LC_ALL": "C", "LANG": "C", "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"}
+
+# url -> (user name, token) or None; set by the panel from the saved server accounts
+CREDENTIALS = None
+
+_ASKPASS = """#!/bin/sh
+# GeoGit: answers git's user name / password questions for one command, then is deleted
+case "$1" in
+  [Uu]sername*) cat "$(dirname "$0")/user" ;;
+  *) cat "$(dirname "$0")/token" ;;
+esac
+"""
+
+
+@contextlib.contextmanager
+def askpass(creds):
+    """GIT_ASKPASS environment for one git command with these credentials.
+
+    The token sits in a private folder (0700) only while the command runs, so it is
+    never on a command line or in .git/config. The folder is under ~/.cache, which a
+    Flatpak QGIS and the computer's git both see at the same path.
+    """
+    if not creds:
+        yield {}
+        return
+    base = os.path.join(os.path.expanduser("~"), ".cache", "geogit")
+    os.makedirs(base, mode=0o700, exist_ok=True)
+    folder = tempfile.mkdtemp(prefix="askpass-", dir=base)
+    try:
+        for name, value in (("user", creds[0]), ("token", creds[1])):
+            path = os.path.join(folder, name)
+            with open(os.open(path, os.O_WRONLY | os.O_CREAT, 0o600), "w", encoding="utf-8") as f:
+                f.write(value + "\n")
+        script = os.path.join(folder, "askpass.sh")
+        with open(os.open(script, os.O_WRONLY | os.O_CREAT, 0o700), "w", encoding="utf-8") as f:
+            f.write(_ASKPASS)
+        yield {"GIT_ASKPASS": script}
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
 FLATPAK_PERMISSION_CMD = "flatpak override --user --talk-name=org.freedesktop.Flatpak {app}"
 
 
@@ -193,11 +233,12 @@ def _env():
     return env
 
 
-def _command(args, cwd):
+def _command(args, cwd, extra_env=None):
     """The argv to run git with args in cwd (through the host when inside a Flatpak)."""
     if git_mode() == "host":
+        env = {**GIT_ENV, **(extra_env or {})}
         return ["flatpak-spawn", "--host", f"--directory={os.path.abspath(cwd)}",
-                *[f"--env={k}={v}" for k, v in GIT_ENV.items()], "git", *args]
+                *[f"--env={k}={v}" for k, v in env.items()], "git", *args]
     return ["git", *args]
 
 
@@ -261,19 +302,20 @@ def install_lfs(plan):
     return out
 
 
-def run_git(args, cwd, check=True, timeout=600, out_file=None):
+def run_git(args, cwd, check=True, timeout=600, out_file=None, extra_env=None):
     """Run git and return its output as text; with out_file, stream stdout there instead."""
     if git_mode() == "flatpak-no-permission":
         raise GitError("git is not reachable from this Flatpak QGIS; allow it with: "
                        + FLATPAK_PERMISSION_CMD.format(app=flatpak_app_id()))
-    cmd = _command(args, cwd)
+    cmd = _command(args, cwd, extra_env)
+    env = {**_env(), **(extra_env or {})}
     try:
         if out_file:
             with open(out_file, "wb") as f:
-                proc = subprocess.run(cmd, cwd=cwd, env=_env(), stdout=f,
+                proc = subprocess.run(cmd, cwd=cwd, env=env, stdout=f,
                                       stderr=subprocess.PIPE, timeout=timeout, stdin=subprocess.DEVNULL)
         else:
-            proc = subprocess.run(cmd, cwd=cwd, env=_env(), capture_output=True,
+            proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True,
                                   timeout=timeout, stdin=subprocess.DEVNULL)
     except FileNotFoundError as e:
         raise GitError("git is not installed") from e
@@ -305,7 +347,8 @@ def clone(url, dest, config=None):
     config = config or {}
     parent = os.path.dirname(os.path.abspath(dest)) or "."
     opts = [x for k, v in config.items() for x in ("-c", f"{k}={v}")]
-    run_git([*opts, "clone", url, dest], parent, timeout=3600)
+    with askpass(CREDENTIALS(url) if CREDENTIALS else None) as env:
+        run_git([*opts, "clone", url, dest], parent, timeout=3600, extra_env=env)
     repo = GitRepo(dest)
     for k, v in config.items():
         repo.git("config", k, v)
@@ -314,7 +357,7 @@ def clone(url, dest, config=None):
         # can hold pointer files: switch LFS on here and fetch the content
         repo.enable_lfs()
         if repo.has_commits():          # an empty repository has nothing to fetch
-            repo.git("lfs", "pull", timeout=3600)
+            repo.git("lfs", "pull", timeout=3600, auth=True)
     return repo
 
 
@@ -322,8 +365,12 @@ class GitRepo:
     def __init__(self, path):
         self.path = os.path.abspath(path)
 
-    def git(self, *args, check=True, timeout=600, out_file=None):
-        return run_git(list(args), self.path, check=check, timeout=timeout, out_file=out_file)
+    def git(self, *args, check=True, timeout=600, out_file=None, auth=False):
+        """auth: this command talks to the server, so offer the saved account's token."""
+        creds = CREDENTIALS(self.remote_url()) if auth and CREDENTIALS else None
+        with askpass(creds) as env:
+            return run_git(list(args), self.path, check=check, timeout=timeout, out_file=out_file,
+                           extra_env=env)
 
     # --- setup ---------------------------------------------------------
     def is_repo(self):
@@ -380,7 +427,7 @@ class GitRepo:
 
     def lfs_pull(self):
         if self.has_commits():
-            self.git("lfs", "pull", timeout=3600)
+            self.git("lfs", "pull", timeout=3600, auth=True)
 
     def _append_lines(self, name, lines):
         path = os.path.join(self.path, name)
@@ -576,7 +623,7 @@ class GitRepo:
                 os.remove(full)
 
     def fetch(self):
-        self.git("fetch", "--prune", timeout=3600)
+        self.git("fetch", "--prune", timeout=3600, auth=True)
 
     def pull(self):
         """Get updates; returns the conflicted paths ([] when it merged cleanly)."""
@@ -584,16 +631,16 @@ class GitRepo:
         args = ["pull", "--rebase=false", "--no-edit"]
         if not info.upstream and not info.detached:
             args += ["origin", info.name]
-        return self._merging(args)
+        return self._merging(args, auth=True)
 
     # --- merge and conflicts -------------------------------------------
     def merge(self, branch):
         """Merge branch into the current one; returns the conflicted paths."""
         return self._merging(["merge", "--no-ff", "--no-edit", branch])
 
-    def _merging(self, args):
+    def _merging(self, args, auth=False):
         try:
-            self.git(*args, timeout=3600)
+            self.git(*args, timeout=3600, auth=auth)
             return []
         except GitError:
             conflicts = self.conflicts() if self.in_merge() else []
@@ -677,9 +724,9 @@ class GitRepo:
         if info.detached:
             raise GitError("not on a branch")
         if info.upstream:
-            self.git("push", "--follow-tags", timeout=3600)
+            self.git("push", "--follow-tags", timeout=3600, auth=True)
         else:
-            self.git("push", "--follow-tags", "-u", "origin", info.name, timeout=3600)
+            self.git("push", "--follow-tags", "-u", "origin", info.name, timeout=3600, auth=True)
 
     # --- tags, restore, revert -----------------------------------------
     def tags(self):
@@ -727,21 +774,21 @@ class GitRepo:
     def locks(self):
         """Locks on the server; ours/theirs is filled when the server can verify them."""
         try:
-            data = json.loads(self.git("lfs", "locks", "--verify", "--json", timeout=120) or "{}")
+            data = json.loads(self.git("lfs", "locks", "--verify", "--json", timeout=120, auth=True) or "{}")
             return ([self._lock(d, True) for d in data.get("ours") or []]
                     + [self._lock(d, False) for d in data.get("theirs") or []])
         except (GitError, ValueError, AttributeError):
-            data = json.loads(self.git("lfs", "locks", "--json", timeout=120) or "[]")
+            data = json.loads(self.git("lfs", "locks", "--json", timeout=120, auth=True) or "[]")
             return [self._lock(d) for d in data]
 
     def lock(self, path):
-        data = json.loads(self.git("lfs", "lock", "--json", path, timeout=120))
+        data = json.loads(self.git("lfs", "lock", "--json", path, timeout=120, auth=True))
         if isinstance(data, list):      # some git-lfs versions wrap the lock in a list
             data = data[0] if data else {}
         return self._lock(data, True)
 
     def unlock(self, path, force=False):
-        self.git("lfs", "unlock", *(["--force"] if force else []), path, timeout=120)
+        self.git("lfs", "unlock", *(["--force"] if force else []), path, timeout=120, auth=True)
 
     def create_branch(self, name, checkout=True):
         self.git("switch", "-c", name) if checkout else self.git("branch", name)

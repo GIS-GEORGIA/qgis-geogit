@@ -16,7 +16,7 @@ from qgis.PyQt.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QCo
                                  QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from . import git_backend as gb
-from . import graph, i18n, project_diff, raster_diff, vector_diff
+from . import accounts, graph, i18n, project_diff, raster_diff, vector_diff
 from .history_view import GRAPH_ROLE, GraphDelegate, author_icon, graph_width
 from .i18n import t
 
@@ -87,6 +87,7 @@ class GeoGitDock(QgsDockWidget):
     def __init__(self, iface):
         super().__init__()
         self.iface = iface
+        gb.CREDENTIALS = accounts.credentials      # tokens of saved server accounts, from memory
         self.folder = ""
         self.repo = None
         self._tasks = []
@@ -205,7 +206,10 @@ class GeoGitDock(QgsDockWidget):
         self.remote_label.setWordWrap(True)
         self.btn_remote = QPushButton(_icon("/mActionOptions.svg"), "")
         self.btn_remote.clicked.connect(self._set_remote)
+        self.btn_create_remote = QPushButton(_icon("/mActionSharingExport.svg"), "")
+        self.btn_create_remote.clicked.connect(self.create_on_server)
         rm.addWidget(self.remote_label, 1)
+        rm.addWidget(self.btn_create_remote)
         rm.addWidget(self.btn_remote)
         l1.addLayout(rm)
 
@@ -395,6 +399,8 @@ class GeoGitDock(QgsDockWidget):
         self.btn_resolve.setText(t("resolve"))
         self.btn_abort.setText(t("abort_merge"))
         self.btn_remote.setToolTip(t("set_remote"))
+        self.btn_create_remote.setText(t("create_on_server"))
+        self.btn_create_remote.setToolTip(t("create_on_server_tip"))
         self.btn_pull.setText(t("pull"))
         self.btn_push.setText(t("push"))
         self.btn_refresh.setToolTip(t("refresh"))
@@ -673,6 +679,7 @@ class GeoGitDock(QgsDockWidget):
         if not self.repo.remote_url():
             self._show_locks([], t("locks_need_remote"))
             return
+        self._prepare_credentials()
         self._run(t("locks"), self.repo.locks, after=self._show_locks, quiet=True, refresh=False,
                   on_error=lambda e: self._show_locks([], t("locks_failed", e)))
 
@@ -701,6 +708,7 @@ class GeoGitDock(QgsDockWidget):
     def lock_file(self, path):
         repo = self.repo
         paths = self._dataset_paths(path)
+        self._prepare_credentials()
         self._run(t("lock"), lambda: [repo.lock(p) for p in paths], t("locked_ok", path),
                   after=lambda _: self.load_locks())
 
@@ -712,6 +720,7 @@ class GeoGitDock(QgsDockWidget):
                 return
         repo = self.repo
         paths = [p for p in self._dataset_paths(path) if p in self._locks] or [path]
+        self._prepare_credentials()
         self._run(t("unlock"), lambda: [repo.unlock(p, force) for p in paths], t("unlocked_ok", path),
                   after=lambda _: self.load_locks())
 
@@ -1166,6 +1175,7 @@ class GeoGitDock(QgsDockWidget):
             if len(projects) == 1:
                 self.iface.addProject(projects[0])
 
+        self._prepare_credentials(url)
         self._run(t("clone"), lambda: gb.clone(url, dest), t("cloned", dest), after)
 
     def _ensure_identity(self):
@@ -1237,6 +1247,7 @@ class GeoGitDock(QgsDockWidget):
         self.refresh()
 
     def _pull(self):
+        self._prepare_credentials()
         repo = self.repo
         project = self._project_in_repo()
         before = os.path.getmtime(project) if project else None
@@ -1253,7 +1264,17 @@ class GeoGitDock(QgsDockWidget):
 
         self._run(t("pull"), repo.pull, None, after_pull)
 
+    def _prepare_credentials(self, url=None):
+        """Read the saved token for this server now (main thread: may ask for the master password)."""
+        url = url or (self.repo.remote_url() if self.repo is not None else "")
+        if url:
+            try:
+                accounts.prepare(url)
+            except Exception:       # a locked auth database just means: no saved token
+                pass
+
     def _push(self):
+        self._prepare_credentials()
         self._run(t("push"), self.repo.push, t("pushed"), after=lambda _: self.load_locks())
 
     def _refresh_and_fetch(self):
@@ -1261,7 +1282,42 @@ class GeoGitDock(QgsDockWidget):
             self._after_lfs_install()      # git-lfs was installed by hand meanwhile
         self.refresh()
         if self.repo and self.repo.remote_url():
+            self._prepare_credentials()
             self._run(t("refresh"), self.repo.fetch, after=lambda _: self.load_locks())
+
+    def create_on_server(self):
+        """Create a repository on GitHub, GitLab, Bitbucket or Forgejo for this folder and publish to it."""
+        from .server_dialog import CreateRepoDialog
+        if self.repo is None:
+            return
+        if self.repo.remote_url() and QMessageBox.question(
+                self, "GeoGit", t("srv_replace_q", self.repo.remote_url())) != QMessageBox.StandardButton.Yes:
+            return
+        dlg = CreateRepoDialog(self.repo.path, self)
+        dlg.exec()
+        if dlg.created is None:        # closed, or nothing was created (exec() codes differ in PyQt6)
+            return
+        account, created = dlg.account, dlg.created
+        if dlg.remember.isChecked():
+            try:
+                accounts.save(account)
+            except RuntimeError as e:
+                accounts.remember_for_session(account)
+                QMessageBox.warning(self, "GeoGit", t("srv_save_failed", e))
+        else:
+            accounts.remember_for_session(account)
+        self.repo.set_remote(created.clone_url)
+        link = f'<a href="{created.web_url}">{created.web_url}</a>'
+        if not self.repo.has_commits():
+            self.iface.messageBar().pushMessage("GeoGit", t("srv_created_empty", link), Qgis.MessageLevel.Success, 15)
+            self.refresh()
+            return
+        if not self._ensure_identity():
+            return
+        repo = self.repo
+        self._run(t("push"), repo.push, None,
+                  after=lambda _: self.iface.messageBar().pushMessage(
+                      "GeoGit", t("srv_published", link), Qgis.MessageLevel.Success, 20))
 
     def _set_remote(self):
         url, ok = QInputDialog.getText(self, t("set_remote"), t("remote_url"), QLineEdit.EchoMode.Normal,

@@ -7,6 +7,7 @@
 ## რას აკეთებს
 - **ცვლილებები:** შეცვლილი ფაილების სია ტიპებით, „შენახვა ვერსიად“, ცვლილების გაუქმება
 - **სერვერი:** „გამოქვეყნება“ (push), „მოტანა“ (pull), ჩამოტვირთვა (clone), ბრენჩები
+- **რეპოს შექმნა პანელიდან:** GitHub, GitLab (gitlab.com ან საკუთარი), Bitbucket, Forgejo/Gitea; ტოკენი QGIS-ის დაშიფრულ auth ბაზაში ინახება და git-ს მხოლოდ ბრძანების დროს გადაეცემა (`GIT_ASKPASS`)
 - **ისტორია:** ხე (გრაფი) ბრენჩებით, ფერი ავტორის მიხედვით, ფილტრი ავტორით, ფაილის ტიპით და ტექსტით, ერთი ფაილის ისტორია
 - **ვექტორის შედარება რუკაზე:** დამატებული (მწვანე), შეცვლილი (ნარინჯისფერი, ძველი საზღვრით), წაშლილი (წითელი)
 - **რასტრის შედარება:** სხვაობის ფენა, შეცვლილი უბნების კონტურები, სტატისტიკა, swipe
@@ -42,6 +43,7 @@ QT_QPA_PLATFORM=offscreen python3 tests/smoke_project.py # პროექტი
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_merge.py   # pull კონფლიქტით, შერწყმა და დასრულება
 QT_QPA_PLATFORM=offscreen python3 tests/smoke_tools.py   # tag, ანგარიში, აღდგენა, revert, ძველი ვერსია რუკაზე
 python3 tests/server_e2e.py                              # ორი მომხმარებელი ლოკალურ Forgejo-ზე
+python3 tests/server_hosting.py                          # რეპოს შექმნა API-ით და push მხოლოდ askpass-ით
 scripts/test_in_docker.sh 3.44 4.0 4.2                   # ყველა ტესტი QGIS-ის ოფიციალურ docker image-ებში
 scripts/test_in_flatpak.sh                               # ყველა ტესტი Flatpak QGIS-ში (git კომპიუტერიდან)
 ```
@@ -55,6 +57,7 @@ Puts a whole project folder (`.qgz`, vector and raster layers, styles, documents
 ## Features
 - **Changes:** changed files by type, save a version, discard changes
 - **Server:** publish (push), get updates (pull), download (clone), branches; GitHub, Forgejo/Gitea or any git server
+- **Create the repository from the panel:** GitHub, GitLab (gitlab.com or self-hosted), Bitbucket, Forgejo/Gitea; the token stays in the encrypted QGIS authentication database and reaches git only while a command runs (`GIT_ASKPASS`)
 - **History:** graph with branches and merges, colour per author, filters by author, file type and text, history of one file
 - **Vector comparison on the map:** added (green), modified (orange, with the old shape), deleted (red)
 - **Raster comparison:** difference layer, outlines of changed areas, statistics, swipe tool
